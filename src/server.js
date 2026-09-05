@@ -56,6 +56,8 @@ const MIME = {
   '.js': 'application/javascript; charset=utf-8',
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
   '.ico': 'image/x-icon',
 };
 
@@ -301,9 +303,15 @@ router.get('/admin/site-audit/job/:jobId/detail', (req, res) => {
 
 // ---------- 명세기반 블랙박스 테스트케이스 생성 (프론트 문서 업로드 폼) ----------
 // 엑셀/워드/PDF/텍스트 명세 문서를 업로드하면 ISO/IEC 25010(품질특성) · 25023(품질측정) ·
-// 29119(테스트 설계기법) 표준을 적용해 Claude API로 테스트케이스를 생성한다. 로그인 불필요.
+// 29119(테스트 설계기법) 표준을 적용해 Claude API로 테스트케이스를 생성한다.
+// Claude API 호출은 토큰(비용)을 소모하므로, 업로드는 로그인 없이 가능하되
+// 실제 생성은 관리자가 문서 내용을 확인하고 승인해야만 실행된다 (승인 전까지 API 미호출).
 router.get('/spec-test/status', (req, res) => {
-  res.json({ configured: specTestGen.isConfigured(), items: specTestStore.getAll() });
+  if (!isAdmin(req)) {
+    res.statusCode = 401;
+    return res.json({ ok: false, error: '관리자 로그인이 필요합니다.' });
+  }
+  res.json({ configured: specTestGen.isConfigured(), items: specTestStore.getAllPublic() });
 });
 
 router.post('/spec-test/upload', (req, res) => {
@@ -319,6 +327,7 @@ router.post('/spec-test/upload', (req, res) => {
       if (!file || !file.data || file.data.length === 0) {
         return res.status(400).json({ ok: false, error: '업로드된 파일이 없습니다.' });
       }
+      // 업로드 자체는 로그인 없이 누구나 가능하며, 실제 생성(토큰 소모)은 관리자 승인이 필요하다.
       if (file.data.length > specTestStore.MAX_FILE_BYTES) {
         return res.status(400).json({ ok: false, error: '파일 크기가 너무 큽니다 (최대 10MB).' });
       }
@@ -326,14 +335,11 @@ router.post('/spec-test/upload', (req, res) => {
       specTestStore.checkRateLimit();
 
       const { text, format, truncated } = await docParser.extractText(file.data, file.filename);
-      const entry = specTestStore.createPending({ filename: file.filename, format });
-      res.json({ ok: true, id: entry.id, truncated });
-
-      // 생성 자체는 시간이 걸릴 수 있으므로 응답 후 백그라운드에서 처리하고 상태를 갱신한다.
-      specTestGen
-        .generateTestCases(text, format)
-        .then((result) => specTestStore.markDone(entry.id, result))
-        .catch((err) => specTestStore.markError(entry.id, err.message));
+      const preview = docParser.makePreview(text);
+      const entry = specTestStore.createPendingApproval({ filename: file.filename, format, previewText: preview });
+      // 승인 전까지 실제 생성에 쓸 원문 텍스트를 DB에 임시 보관한다 (승인/거부 시 정리됨).
+      specTestStore.setFullText(entry.id, text);
+      res.json({ ok: true, id: entry.id, truncated, pendingApproval: true });
     } catch (err) {
       res.status(400).json({ ok: false, error: err.message });
     }
@@ -341,12 +347,57 @@ router.post('/spec-test/upload', (req, res) => {
 });
 
 router.get('/spec-test/:id', (req, res) => {
-  const entry = specTestStore.getById(req.params.id);
+  if (!isAdmin(req)) {
+    res.statusCode = 401;
+    return res.json({ ok: false, error: '관리자 로그인이 필요합니다.' });
+  }
+  const entry = specTestStore.getByIdPublic(req.params.id);
   if (!entry) {
     res.statusCode = 404;
     return res.json({ ok: false, error: '해당 요청을 찾을 수 없습니다.' });
   }
   res.json({ ok: true, item: entry });
+});
+
+// 관리자 승인: 이 시점부터 실제로 Claude API를 호출해 토큰을 소모하며 테스트케이스를 생성한다.
+router.post('/admin/spec-test/:id/approve', (req, res) => {
+  requireAdmin(req, res, () => {
+    const entry = specTestStore.getById(req.params.id);
+    if (!entry) {
+      res.statusCode = 404;
+      return res.json({ ok: false, error: '해당 요청을 찾을 수 없습니다.' });
+    }
+    if (entry.status !== 'pending_approval') {
+      return res.status(400).json({ ok: false, error: '승인 대기 상태의 요청이 아닙니다.' });
+    }
+    const fullText = entry.fullText;
+    const format = entry.format;
+    specTestStore.markApprovedProcessing(entry.id);
+    res.json({ ok: true });
+
+    // 생성 자체는 시간이 걸릴 수 있으므로 응답 후 백그라운드에서 처리하고 상태를 갱신한다.
+    specTestGen
+      .generateTestCases(fullText, format)
+      .then((result) => specTestStore.markDone(entry.id, result))
+      .catch((err) => specTestStore.markError(entry.id, err.message));
+  });
+});
+
+// 관리자 반려: Claude API를 호출하지 않으므로 토큰이 소모되지 않는다.
+router.post('/admin/spec-test/:id/reject', (req, res) => {
+  requireAdmin(req, res, () => {
+    const entry = specTestStore.getById(req.params.id);
+    if (!entry) {
+      res.statusCode = 404;
+      return res.json({ ok: false, error: '해당 요청을 찾을 수 없습니다.' });
+    }
+    if (entry.status !== 'pending_approval') {
+      return res.status(400).json({ ok: false, error: '승인 대기 상태의 요청이 아닙니다.' });
+    }
+    const reason = (req.body && req.body.reason) || '관리자가 반려했습니다.';
+    specTestStore.markRejected(entry.id, reason);
+    res.json({ ok: true });
+  });
 });
 
 // ---------- 헬스체크 (Render 등 배포 플랫폼용) ----------

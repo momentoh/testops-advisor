@@ -78,4 +78,14 @@ async function extractText(buffer, filename) {
   return { text: truncate(raw), format, truncated: truncatedFlag };
 }
 
-module.exports = { extractText, MAX_CHARS };
+const PREVIEW_CHARS = 500;
+
+/** 관리자 승인 화면에 보여줄 문서 앞부분 미리보기 텍스트를 만든다. */
+function makePreview(text) {
+  if (!text) return '';
+  const trimmed = text.trim();
+  if (trimmed.length <= PREVIEW_CHARS) return trimmed;
+  return trimmed.slice(0, PREVIEW_CHARS) + '...';
+}
+
+module.exports = { extractText, MAX_CHARS, makePreview };

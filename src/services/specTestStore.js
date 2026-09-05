@@ -34,15 +34,22 @@ function checkRateLimit() {
   }
 }
 
-/** 새 요청을 "처리 중" 상태로 기록한다. */
-function createPending({ filename, format }) {
+/**
+ * 새 요청을 "승인 대기" 상태로 기록한다. Claude API 호출은 토큰(비용)을 소모하므로,
+ * 관리자가 내용을 확인하고 승인하기 전까지는 실제 생성을 실행하지 않는다.
+ */
+function createPendingApproval({ filename, format, previewText }) {
   const db = getDB();
   const entry = {
     id: crypto.randomUUID(),
     filename,
     format,
-    status: 'processing', // processing | done | error
+    previewText: previewText || '',
+    fullText: null, // 승인 시 실제 생성에 사용할 원문 텍스트 (승인 전까지만 임시 보관)
+    status: 'pending_approval', // pending_approval | rejected | processing | done | error
     requestedAt: new Date().toISOString(),
+    approvedAt: null,
+    rejectedAt: null,
     completedAt: null,
     summary: null,
     testCases: [],
@@ -50,6 +57,39 @@ function createPending({ filename, format }) {
   };
   db.specTests.push(entry);
   if (db.specTests.length > 30) db.specTests = db.specTests.slice(-30); // 이력 최근 30건만 유지
+  persist();
+  return entry;
+}
+
+/** 승인 전까지 실제 생성에 사용할 원문 텍스트를 저장한다. */
+function setFullText(id, fullText) {
+  const db = getDB();
+  const entry = db.specTests.find((s) => s.id === id);
+  if (!entry) return;
+  entry.fullText = fullText;
+  persist();
+}
+
+/** 관리자가 승인 시 "처리 중" 상태로 전환한다 (이때부터 실제 Claude API 호출이 시작됨). */
+function markApprovedProcessing(id) {
+  const db = getDB();
+  const entry = db.specTests.find((s) => s.id === id);
+  if (!entry) return null;
+  entry.status = 'processing';
+  entry.approvedAt = new Date().toISOString();
+  persist();
+  return entry;
+}
+
+/** 관리자가 반려 시 "반려" 상태로 전환한다 (Claude API 호출 없이 종료, 토큰 미소모). */
+function markRejected(id, reason) {
+  const db = getDB();
+  const entry = db.specTests.find((s) => s.id === id);
+  if (!entry) return null;
+  entry.status = 'rejected';
+  entry.rejectedAt = new Date().toISOString();
+  entry.error = reason || null;
+  entry.fullText = null;
   persist();
   return entry;
 }
@@ -62,6 +102,7 @@ function markDone(id, { summary, testCases }) {
   entry.completedAt = new Date().toISOString();
   entry.summary = summary;
   entry.testCases = testCases;
+  entry.fullText = null; // 생성 완료 후에는 원문 보관 불필요
   persist();
 }
 
@@ -72,15 +113,36 @@ function markError(id, message) {
   entry.status = 'error';
   entry.completedAt = new Date().toISOString();
   entry.error = message;
+  entry.fullText = null;
   persist();
+}
+
+/** 목록/상세 조회 시 원문 전체 텍스트(fullText)는 응답에서 제외한다 (불필요한 대용량 전송 방지). */
+function toPublicShape(entry) {
+  if (!entry) return entry;
+  const { fullText, ...rest } = entry;
+  return rest;
+}
+
+function getAllPublic() {
+  return getAll().map(toPublicShape);
+}
+
+function getByIdPublic(id) {
+  return toPublicShape(getById(id));
 }
 
 module.exports = {
   getLast,
   getAll,
   getById,
+  getAllPublic,
+  getByIdPublic,
   checkRateLimit,
-  createPending,
+  createPendingApproval,
+  setFullText,
+  markApprovedProcessing,
+  markRejected,
   markDone,
   markError,
   MAX_FILE_BYTES,
