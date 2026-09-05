@@ -122,10 +122,30 @@ describe('recommendForStage', () => {
     db.tools.push({ id: 'tool-2', stageId: 'unit-testing', name: 'pytest', weight: 0.5, upvotes: 0, downvotes: 0 });
     store.persist();
 
-    recommend.recordFeedback({ toolId: 'tool-1', stageId: 'unit-testing', vote: 'up' });
+    // Wilson score는 피드백 건수가 적으면 신뢰도를 보수적으로 낮게 잡으므로,
+    // 업보트 1건만으로는 순위를 뒤집기에 충분하지 않다. 충분한 피드백을 쌓아
+    // tool-1이 명확히 더 높은 신뢰도를 갖도록 만든 뒤 정렬을 검증한다.
+    for (let i = 0; i < 20; i++) {
+      recommend.recordFeedback({ toolId: 'tool-1', stageId: 'unit-testing', vote: 'up' });
+    }
 
     const results = recommend.recommendForStage('unit-testing');
     expect(results[0].id).toBe('tool-1');
     expect(results[0].score).toBeGreaterThanOrEqual(results[1].score);
+  });
+
+  test('피드백이 거의 없는 도구는 다수의 업보트를 받은 도구보다 낮은 순위를 갖는다', () => {
+    const db = store.getDB();
+    db.tools.push({ id: 'tool-2', stageId: 'unit-testing', name: 'pytest', weight: 1.0, upvotes: 0, downvotes: 0 });
+    store.persist();
+
+    for (let i = 0; i < 10; i++) {
+      recommend.recordFeedback({ toolId: 'tool-1', stageId: 'unit-testing', vote: 'up' });
+    }
+
+    const results = recommend.recommendForStage('unit-testing');
+    const tool1 = results.find(r => r.id === 'tool-1');
+    const tool2 = results.find(r => r.id === 'tool-2');
+    expect(tool1.confidence).toBeGreaterThan(tool2.confidence);
   });
 });
