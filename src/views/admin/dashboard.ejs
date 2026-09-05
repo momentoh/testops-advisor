@@ -367,6 +367,116 @@
   pollSiteAuditStatus();
 </script>
 
+<h2>명세기반 블랙박스 테스트케이스 생성 이력</h2>
+<div class="card">
+  <p style="color:#6b7280; font-size:13px; margin-top:0;">
+    홈페이지의 "명세기반 블랙박스 테스트케이스 자동 생성" 업로드 폼으로 요청된 이력입니다. 최근 30건까지 보관됩니다.
+  </p>
+  <div id="spec-admin-empty" style="display:none; color:#9ca3af; font-size:13px;">아직 생성된 테스트케이스가 없습니다.</div>
+  <table class="admin-table" id="spec-admin-table" style="display:none;">
+    <thead><tr><th>파일명</th><th>요청 시각</th><th>상태</th><th>테스트케이스 수</th></tr></thead>
+    <tbody id="spec-admin-body"></tbody>
+  </table>
+  <div id="spec-admin-detail" style="display:none; margin-top:16px;"></div>
+</div>
+
+<script>
+  let specAdminCache = {};
+
+  function specAdminStatusLabel(status) {
+    if (status === 'done') return { text: '✅ 완료', color: '#16a34a' };
+    if (status === 'error') return { text: '❌ 실패', color: '#dc2626' };
+    return { text: '⏳ 처리 중', color: '#d97706' };
+  }
+
+  function renderSpecAdminDetail(item) {
+    const box = document.getElementById('spec-admin-detail');
+    box.style.display = 'block';
+
+    if (item.status === 'error') {
+      box.innerHTML = '<div style="color:#dc2626; font-size:13px;">❌ 생성 실패: ' + item.error + '</div>';
+      return;
+    }
+    if (item.status !== 'done') {
+      box.innerHTML = '<div style="color:#d97706; font-size:13px;">⏳ 처리 중입니다.</div>';
+      return;
+    }
+
+    let html = '<p style="font-size:13px; background:#f9fafb; padding:10px 12px; border-radius:8px;"><strong>문서 요약:</strong> ' + item.summary + '</p>';
+    html += '<table class="admin-table"><thead><tr><th>ID</th><th>제목 / 요구사항</th><th>표준 매핑</th><th>절차 · 데이터 · 기대결과</th><th>우선순위</th></tr></thead><tbody>';
+    (item.testCases || []).forEach(function (tc) {
+      const steps = (tc.steps || []).map(function (s) { return '<li>' + s + '</li>'; }).join('');
+      html += '<tr>' +
+        '<td>' + tc.id + '</td>' +
+        '<td><strong>' + tc.title + '</strong><br><span style="color:#6b7280; font-size:12px;">' + tc.requirement + '</span></td>' +
+        '<td><span style="display:inline-block; background:#eef2ff; color:#4338ca; border-radius:999px; padding:2px 8px; font-size:11px;">25010: ' + tc.iso25010 + '</span><br>' +
+          '<span style="display:inline-block; background:#eef2ff; color:#4338ca; border-radius:999px; padding:2px 8px; font-size:11px; margin-top:4px;">29119: ' + tc.designTechnique + '</span></td>' +
+        '<td><strong>사전조건:</strong> ' + (tc.preconditions || '-') + '<br>' +
+          '<strong>절차:</strong><ol style="margin:4px 0; padding-left:18px;">' + steps + '</ol>' +
+          '<strong>테스트 데이터:</strong> ' + (tc.testData || '-') + '<br>' +
+          '<strong>기대 결과:</strong> ' + (tc.expectedResult || '-') +
+        '</td>' +
+        '<td>' + (tc.priority || '-') + '</td>' +
+        '</tr>';
+    });
+    html += '</tbody></table>';
+    box.innerHTML = html;
+  }
+
+  function viewSpecAdminItem(id) {
+    const item = specAdminCache[id];
+    if (!item) return;
+    renderSpecAdminDetail(item);
+    document.getElementById('spec-admin-detail').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  function pollSpecAdminStatus() {
+    fetch('/spec-test/status')
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        const items = data.items || [];
+        const empty = document.getElementById('spec-admin-empty');
+        const table = document.getElementById('spec-admin-table');
+        const body = document.getElementById('spec-admin-body');
+
+        if (items.length === 0) {
+          empty.style.display = 'block';
+          table.style.display = 'none';
+          return;
+        }
+        empty.style.display = 'none';
+        table.style.display = '';
+        body.innerHTML = '';
+        specAdminCache = {};
+
+        items.forEach(function (item) {
+          specAdminCache[item.id] = item;
+          const s = specAdminStatusLabel(item.status);
+          const count = (item.testCases || []).length;
+          const tr = document.createElement('tr');
+          tr.innerHTML =
+            '<td>' + item.filename + '</td>' +
+            '<td>' + new Date(item.requestedAt).toLocaleString('ko-KR') + '</td>' +
+            '<td><span ' + (item.status === 'done' ? 'class="job-status-link" onclick="viewSpecAdminItem(\'' + item.id + '\')" style="cursor:pointer; text-decoration:underline;"' : '') +
+              ' style="color:' + s.color + '">' + s.text + '</span></td>' +
+            '<td>' + (item.status === 'done' ? count + '개' : '-') + '</td>';
+          body.appendChild(tr);
+        });
+
+        const hasProcessing = items.some(function (item) { return item.status === 'processing'; });
+        if (hasProcessing && !window.__specAdminPolling) {
+          window.__specAdminPolling = setInterval(pollSpecAdminStatus, 5000);
+        } else if (!hasProcessing && window.__specAdminPolling) {
+          clearInterval(window.__specAdminPolling);
+          window.__specAdminPolling = null;
+        }
+      })
+      .catch(function () {});
+  }
+
+  pollSpecAdminStatus();
+</script>
+
 <h2>피드백 학습 현황</h2>
 <div class="stat-grid">
   <div class="stat-box"><div class="num"><%= stats.totalFeedback %></div><div class="label">총 피드백 수</div></div>
