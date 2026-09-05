@@ -194,7 +194,10 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, () => {
+// 0.0.0.0에 명시적으로 바인딩한다. 호스트를 지정하지 않으면 Node 버전/환경에 따라
+// IPv6(::)에만 바인딩되어 127.0.0.1(IPv4)로 접속하는 CI 헬스체크(wait-on 등)가
+// 연결에 실패하는 경우가 있다 (예: GitHub Actions 러너에서 관측됨).
+server.listen(PORT, '0.0.0.0', () => {
   console.log(`[testops-advisor] 서버가 http://localhost:${PORT} 에서 실행 중입니다.`);
 });
 
