@@ -6,6 +6,7 @@ const { Router, extendResponse } = require('./lib/router');
 const { render } = require('./lib/template');
 const recommend = require('./services/recommend');
 const toolsService = require('./services/tools');
+const ci = require('./services/ci');
 const { isAdmin, setAdminCookie, clearAdminCookie, requireAdmin } = require('./middleware/auth');
 const { getDB } = require('./db/store');
 const { seed } = require('./db/seed');
@@ -159,6 +160,54 @@ router.post('/admin/tools/:id/delete', (req, res) => {
   requireAdmin(req, res, () => {
     toolsService.deleteTool(req.params.id);
     res.redirect('/admin');
+  });
+});
+
+// ---------- CI 파이프라인 연동 (관리자 대시보드 "테스트 실행" 버튼) ----------
+router.get('/admin/ci/status', (req, res) => {
+  requireAdmin(req, res, async () => {
+    try {
+      if (!ci.isConfigured()) {
+        return res.json({ configured: false });
+      }
+      const run = await ci.getLatestRun();
+      if (!run) return res.json({ configured: true, run: null });
+      const jobs = await ci.getRunJobs(run.id);
+      res.json({
+        configured: true,
+        run: {
+          id: run.id,
+          status: run.status,       // queued | in_progress | completed
+          conclusion: run.conclusion, // success | failure | null
+          htmlUrl: run.html_url,
+          createdAt: run.created_at,
+          updatedAt: run.updated_at,
+        },
+        jobs: jobs.map(j => ({
+          name: j.name,
+          status: j.status,
+          conclusion: j.conclusion,
+          startedAt: j.started_at,
+          completedAt: j.completed_at,
+        })),
+      });
+    } catch (err) {
+      res.status(500).json({ configured: true, error: err.message });
+    }
+  });
+});
+
+router.post('/admin/ci/trigger', (req, res) => {
+  requireAdmin(req, res, async () => {
+    try {
+      if (!ci.isConfigured()) {
+        return res.status(400).json({ ok: false, error: 'GITHUB_TOKEN / GITHUB_REPO 환경변수가 설정되지 않았습니다.' });
+      }
+      await ci.triggerWorkflow();
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
   });
 });
 

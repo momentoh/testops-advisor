@@ -26,7 +26,22 @@ npm start                 # http://localhost:3000
 
 - 접속: `/admin/login`
 - 기본 비밀번호: `.env`의 `ADMIN_PASSWORD` (기본값 `admin1234`, **반드시 배포 전 변경**)
-- 기능: 도구 추가/삭제, 전체 추천 점수/가중치 확인, 단계별·전체 피드백 통계, 최근 피드백 로그
+- 기능: 도구 추가/삭제, 전체 추천 점수/가중치 확인, 단계별·전체 피드백 통계, 최근 피드백 로그, CI 파이프라인 실행/결과 조회
+
+### CI 파이프라인을 웹페이지에서 실행하기
+
+관리자 대시보드 상단의 **"▶ 테스트 실행"** 버튼을 누르면 GitHub Actions의 CI 파이프라인(`.github/workflows/ci.yml`)이 실제로 트리거되고, 완료될 때까지 4초 간격으로 상태를 자동 조회해 각 단계(단위테스트/E2E/성능/보안)의 통과·실패 여부와 소요 시간을 화면에 표시합니다.
+
+이 기능을 쓰려면 배포 환경(Render 등)에 아래 환경변수를 추가해야 합니다.
+
+| 환경변수 | 설명 | 예시 |
+|---|---|---|
+| `GITHUB_TOKEN` | `repo`, `workflow` 스코프를 가진 GitHub Personal Access Token | `ghp_...` |
+| `GITHUB_REPO` | `소유자/저장소` 형식 | `momentoh/testops-advisor` |
+| `GITHUB_WORKFLOW_FILE` | (선택) 워크플로우 파일명, 기본값 `ci.yml` | `ci.yml` |
+| `GITHUB_BRANCH` | (선택) 대상 브랜치, 기본값 `main` | `main` |
+
+환경변수가 설정되지 않은 경우 버튼을 눌러도 "GitHub 연동이 설정되지 않았습니다" 안내만 표시되고 기존 기능에는 영향이 없습니다.
 
 ## 추천 로직 설명
 

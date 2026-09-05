@@ -14,3 +14,11 @@ services:
         generateValue: true
       - key: NODE_ENV
         value: production
+      - key: GITHUB_TOKEN
+        sync: false
+      - key: GITHUB_REPO
+        value: momentoh/testops-advisor
+      - key: GITHUB_WORKFLOW_FILE
+        value: ci.yml
+      - key: GITHUB_BRANCH
+        value: main
