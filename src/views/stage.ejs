@@ -1,0 +1,66 @@
+<%- include('partials/head', { title }) %>
+
+<div class="breadcrumb"><a href="/">전체 단계</a> / <%= stage.name %></div>
+<h1><%= stage.order %>. <%= stage.name %> <span style="color:#9ca3af; font-weight:400; font-size:16px;">(<%= stage.nameEn %>)</span></h1>
+<p class="lead"><%= stage.description %></p>
+
+<div class="filter-bar">
+  <a href="/stages/<%= stage.id %>" class="<%= !category ? 'active' : '' %>">전체</a>
+  <a href="/stages/<%= stage.id %>?category=agent" class="<%= category === 'agent' ? 'active' : '' %>">자동화 에이전트</a>
+  <a href="/stages/<%= stage.id %>?category=mcp" class="<%= category === 'mcp' ? 'active' : '' %>">MCP</a>
+  <a href="/stages/<%= stage.id %>?category=platform" class="<%= category === 'platform' ? 'active' : '' %>">플랫폼/SaaS</a>
+</div>
+
+<div class="tool-list">
+  <% if (tools.length === 0) { %>
+    <p class="lead">이 단계에 해당하는 도구가 아직 없습니다. 관리자 화면에서 추가해보세요.</p>
+  <% } %>
+  <% tools.forEach(function(tool, idx) { %>
+    <div class="tool-card" data-tool-id="<%= tool.id %>">
+      <div class="rank">#<%= idx + 1 %></div>
+      <div class="tool-main">
+        <div class="tool-title-row">
+          <h3><%= tool.url ? '' : '' %><%= tool.name %></h3>
+          <span class="badge <%= tool.category %>"><%= tool.category === 'agent' ? '에이전트' : (tool.category === 'mcp' ? 'MCP' : '플랫폼') %></span>
+          <span class="score-pill">추천점수 <%= tool.score.toFixed(2) %></span>
+        </div>
+        <p class="tool-desc"><%= tool.description %></p>
+        <div class="tool-meta">
+          <span>👍 <%= tool.upvotes || 0 %> · 👎 <%= tool.downvotes || 0 %></span>
+          <% if (tool.url) { %><a href="<%= tool.url %>" target="_blank" rel="noopener">자세히 보기 ↗</a><% } %>
+        </div>
+      </div>
+      <div class="vote-buttons">
+        <button class="vote-btn up" onclick="vote('<%= tool.id %>','<%= stage.id %>','up',this)">👍 도움됨</button>
+        <button class="vote-btn down" onclick="vote('<%= tool.id %>','<%= stage.id %>','down',this)">👎 별로</button>
+      </div>
+    </div>
+  <% }) %>
+</div>
+
+<script>
+async function vote(toolId, stageId, voteType, btn) {
+  const parent = btn.closest('.vote-buttons');
+  parent.querySelectorAll('button').forEach(b => b.disabled = true);
+  try {
+    const res = await fetch('/feedback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ toolId, stageId, vote: voteType })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      btn.textContent = voteType === 'up' ? '✅ 반영됨' : '✅ 반영됨';
+      setTimeout(() => location.reload(), 400);
+    } else {
+      alert('오류: ' + data.error);
+      parent.querySelectorAll('button').forEach(b => b.disabled = false);
+    }
+  } catch (e) {
+    alert('네트워크 오류가 발생했습니다.');
+    parent.querySelectorAll('button').forEach(b => b.disabled = false);
+  }
+}
+</script>
+
+<%- include('partials/foot') %>

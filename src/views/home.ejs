@@ -1,0 +1,16 @@
+<%- include('partials/head', { title }) %>
+
+<h1>테스트 프로세스별 자동화 에이전트 · MCP 추천</h1>
+<p class="lead">요구사항분석부터 배포/모니터링까지, SDLC 7단계에 맞는 자동화 도구를 추천합니다. 사용자 피드백이 쌓일수록 추천 품질이 점점 좋아집니다.</p>
+
+<div class="stage-grid">
+  <% stages.forEach(function(stage) { %>
+    <a class="stage-card" href="/stages/<%= stage.id %>">
+      <span class="stage-order"><%= stage.order %></span>
+      <h3><%= stage.name %></h3>
+      <p><%= stage.description %></p>
+    </a>
+  <% }) %>
+</div>
+
+<%- include('partials/foot') %>

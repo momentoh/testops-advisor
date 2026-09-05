@@ -1,0 +1,16 @@
+{
+  "name": "testops-advisor",
+  "version": "1.0.0",
+  "description": "SDLC 7단계 테스트 프로세스별 자동화 에이전트/MCP 추천 시스템 (사용자 피드백 기반 지속 학습)",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node src/server.js",
+    "seed": "node src/db/seed.js"
+  },
+  "license": "MIT",
+  "dependencies": {},
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
