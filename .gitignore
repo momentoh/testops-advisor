@@ -1,6 +1,11 @@
 node_modules/
 data/db.json
+data/e2e-test-db.json
+data/perf-test-db.json
 .env
 server.log
 *.log
 .DS_Store
+playwright-report/
+test-results/
+coverage/

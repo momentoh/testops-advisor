@@ -7,8 +7,12 @@
 const fs = require('fs');
 const path = require('path');
 
-const DATA_DIR = path.join(__dirname, '..', '..', 'data');
-const DB_FILE = path.join(DATA_DIR, 'db.json');
+// 테스트 환경에서는 TESTOPS_DB_PATH로 별도의 임시 DB 파일을 지정해
+// 운영 데이터(data/db.json)를 건드리지 않고 격리된 상태로 검증할 수 있다.
+const DB_FILE = process.env.TESTOPS_DB_PATH
+  ? path.resolve(process.env.TESTOPS_DB_PATH)
+  : path.join(__dirname, '..', '..', 'data', 'db.json');
+const DATA_DIR = path.dirname(DB_FILE);
 
 function ensureDataDir() {
   if (!fs.existsSync(DATA_DIR)) {

@@ -68,4 +68,28 @@ src/
   views/        EJS 문법 서브셋 템플릿
   public/       정적 CSS
   server.js     엔트리포인트
+tests/          Jest 단위 테스트
+e2e/            Playwright 통합/E2E 테스트
+perf/           k6 성능 테스트 스크립트
+.github/workflows/  GitHub Actions CI 파이프라인
 ```
+
+## CI/CD 파이프라인 (7단계 중 1순위 도구 자동화)
+
+7단계 추천 목록 중 실제 코드에 적용 가능한 4개 단계의 1순위 도구를 골라 GitHub Actions로 자동 연동했습니다. `main` 브랜치에 push 하거나 PR을 열면 `.github/workflows/ci.yml`이 아래 순서로 자동 실행됩니다.
+
+1. **단위 테스트 (Jest)** — `tests/recommend.test.js`. 추천 점수 계산(Wilson score confidence), 피드백 기반 가중치 학습(recordFeedback) 로직을 검증합니다.
+2. **통합/E2E 테스트 (Playwright)** — `e2e/homepage.spec.js`. 실제 서버를 기동해 홈페이지, 단계별 추천 페이지, 헬스체크, 관리자 인증 리다이렉트를 브라우저 기준으로 검증합니다.
+3. **성능 테스트 (k6)** — `perf/load-test.js`. 동시 사용자 5명 기준 15초 부하를 가해 실패율 1% 미만, p95 응답 500ms 이내 기준을 검증합니다.
+4. **보안 취약점 점검 (npm audit)** — 의존성 취약점을 점검합니다(높음 등급 이상).
+5. 위 테스트를 모두 통과하면 Render.com이 감지한 push를 기반으로 자동 재배포됩니다.
+
+로컬에서 개별 실행하려면(먼저 `npm install`로 devDependencies 설치 필요):
+
+```bash
+npm test          # Jest 단위 테스트
+npm run test:e2e   # Playwright E2E 테스트 (최초 1회 `npx playwright install` 필요)
+npm run test:perf  # k6 성능 테스트 (k6 별도 설치 필요: https://k6.io/docs/get-started/installation/)
+```
+
+> 요구사항분석·테스트계획·테스트케이스설계 단계의 1순위 도구(Jira, TestRail, Playwright Codegen)는 티켓/문서 관리형 SaaS 도구라 CI로 자동 실행할 성격이 아니어서 이번 파이프라인 범위에서는 제외했습니다.

@@ -6,10 +6,17 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node src/server.js",
-    "seed": "node src/db/seed.js"
+    "seed": "node src/db/seed.js",
+    "test": "jest --colors",
+    "test:e2e": "playwright test",
+    "test:perf": "k6 run perf/load-test.js"
   },
   "license": "MIT",
   "dependencies": {},
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "@playwright/test": "^1.48.0"
+  },
   "engines": {
     "node": ">=18.0.0"
   }
