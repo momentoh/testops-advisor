@@ -62,20 +62,24 @@ function request(method, path, body) {
   });
 }
 
-/** workflow_dispatch로 새 실행을 트리거한다. */
-async function triggerWorkflow() {
+/**
+ * workflow_dispatch로 새 실행을 트리거한다.
+ * workflowFile을 지정하지 않으면 기본 CI 파이프라인(WORKFLOW_FILE)을 사용한다.
+ * inputs은 워크플로우가 정의한 workflow_dispatch.inputs에 대응하는 값들(예: { target_url }).
+ */
+async function triggerWorkflow(workflowFile = WORKFLOW_FILE, inputs = undefined) {
   if (!isConfigured()) throw new Error('GITHUB_TOKEN / GITHUB_REPO 환경변수가 설정되지 않았습니다.');
-  await request('POST', `/repos/${REPO}/actions/workflows/${WORKFLOW_FILE}/dispatches`, {
-    ref: BRANCH,
-  });
+  const payload = { ref: BRANCH };
+  if (inputs) payload.inputs = inputs;
+  await request('POST', `/repos/${REPO}/actions/workflows/${workflowFile}/dispatches`, payload);
 }
 
 /** 가장 최근 workflow run 하나를 조회한다. */
-async function getLatestRun() {
+async function getLatestRun(workflowFile = WORKFLOW_FILE) {
   if (!isConfigured()) throw new Error('GITHUB_TOKEN / GITHUB_REPO 환경변수가 설정되지 않았습니다.');
   const res = await request(
     'GET',
-    `/repos/${REPO}/actions/workflows/${WORKFLOW_FILE}/runs?branch=${BRANCH}&per_page=1`
+    `/repos/${REPO}/actions/workflows/${workflowFile}/runs?branch=${BRANCH}&per_page=1`
   );
   const run = res.body && res.body.workflow_runs && res.body.workflow_runs[0];
   return run || null;

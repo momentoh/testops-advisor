@@ -7,6 +7,7 @@ const { render } = require('./lib/template');
 const recommend = require('./services/recommend');
 const toolsService = require('./services/tools');
 const ci = require('./services/ci');
+const siteAudit = require('./services/siteAudit');
 const { isAdmin, setAdminCookie, clearAdminCookie, requireAdmin } = require('./middleware/auth');
 const { getDB } = require('./db/store');
 const { seed } = require('./db/seed');
@@ -207,6 +208,55 @@ router.post('/admin/ci/trigger', (req, res) => {
       res.json({ ok: true });
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+});
+
+// ---------- 웹사이트 검사 (프론트 홈페이지 URL 입력 폼) ----------
+// 누구나 URL을 제출해 검사를 요청할 수 있다 (로그인 불필요). 결과 조회는 관리자 전용.
+router.post('/site-audit', (req, res) => {
+  (async () => {
+    try {
+      const { url } = req.body;
+      const entry = await siteAudit.requestAudit(url);
+      res.json({ ok: true, requestedAt: entry.requestedAt });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err.message });
+    }
+  })();
+});
+
+router.get('/admin/site-audit/status', (req, res) => {
+  requireAdmin(req, res, async () => {
+    try {
+      const last = siteAudit.getLastAudit();
+      if (!ci.isConfigured()) return res.json({ configured: false, last });
+      if (!last) return res.json({ configured: true, last: null, run: null });
+
+      const run = await ci.getLatestRun(siteAudit.SITE_AUDIT_WORKFLOW);
+      if (!run) return res.json({ configured: true, last, run: null });
+      const jobs = await ci.getRunJobs(run.id);
+      res.json({
+        configured: true,
+        last,
+        run: {
+          id: run.id,
+          status: run.status,
+          conclusion: run.conclusion,
+          htmlUrl: run.html_url,
+          createdAt: run.created_at,
+          updatedAt: run.updated_at,
+        },
+        jobs: jobs.map(j => ({
+          name: j.name,
+          status: j.status,
+          conclusion: j.conclusion,
+          startedAt: j.started_at,
+          completedAt: j.completed_at,
+        })),
+      });
+    } catch (err) {
+      res.status(500).json({ configured: true, error: err.message });
     }
   });
 });

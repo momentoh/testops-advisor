@@ -26,6 +26,7 @@ function defaultData() {
     tools: [],         // 자동화 에이전트 / MCP 목록
     feedback: [],       // 사용자 피드백 로그 (학습 데이터)
     admins: [],         // 관리자 계정 (해시 저장)
+    siteAudits: [],     // 프론트 "웹사이트 검사" 폼으로 제출된 URL 감사 요청 이력
   };
 }
 

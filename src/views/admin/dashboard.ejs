@@ -131,6 +131,128 @@
   pollCiStatus();
 </script>
 
+<h2>웹사이트 검사 결과 (프론트 "웹사이트 종합 검사" 폼)</h2>
+<div class="card">
+  <p style="color:#6b7280; font-size:13px; margin-top:0;">
+    홈페이지에서 사용자가 제출한 가장 최근 검사 요청의 결과입니다. 기능(Playwright) → 성능(k6) → API/HTTP 응답 검증 순서로 실행됩니다.
+  </p>
+  <div id="sa-not-configured" style="display:none; padding:12px; background:#fef3c7; border-radius:8px; font-size:13px;">
+    GitHub 연동이 설정되지 않았습니다. <code>GITHUB_TOKEN</code>, <code>GITHUB_REPO</code> 환경변수를 확인해 주세요.
+  </div>
+  <div id="sa-no-request" style="display:none; color:#9ca3af; font-size:13px;">
+    아직 제출된 검사 요청이 없습니다.
+  </div>
+  <div id="sa-content" style="display:none;">
+    <p style="font-size:13px;">
+      <strong>대상 URL:</strong> <span id="sa-url"></span><br>
+      <strong>요청 시각:</strong> <span id="sa-requested-at"></span><br>
+      <strong>전체 상태:</strong> <span id="sa-overall"></span>
+    </p>
+    <table class="admin-table" id="sa-jobs-table">
+      <thead><tr><th>단계</th><th>상태</th><th>소요 시간</th></tr></thead>
+      <tbody id="sa-jobs-body"></tbody>
+    </table>
+    <div id="sa-run-link" style="margin-top:10px; font-size:13px;"></div>
+    <p style="color:#6b7280; font-size:12px; margin-top:10px;">
+      상세 로그(콘솔 에러, 깨진 링크 목록, HTTP 헤더 등)는 "GitHub Actions에서 자세히 보기" 링크의 각 단계 로그에서 확인할 수 있습니다.
+    </p>
+  </div>
+</div>
+
+<script>
+  let saPolling = null;
+
+  function saStatusLabel(status, conclusion) {
+    if (status === 'completed') {
+      if (conclusion === 'success') return { text: '✅ 통과', color: '#16a34a' };
+      if (conclusion === 'failure') return { text: '❌ 실패', color: '#dc2626' };
+      return { text: conclusion || status, color: '#6b7280' };
+    }
+    if (status === 'in_progress') return { text: '⏳ 진행 중', color: '#d97706' };
+    if (status === 'queued') return { text: '⏳ 대기 중', color: '#6b7280' };
+    return { text: status, color: '#6b7280' };
+  }
+
+  function saFormatDuration(startedAt, completedAt) {
+    if (!startedAt) return '-';
+    const end = completedAt ? new Date(completedAt) : new Date();
+    const sec = Math.max(0, Math.round((end - new Date(startedAt)) / 1000));
+    return sec + '초';
+  }
+
+  function renderSiteAuditStatus(data) {
+    const notConfigured = document.getElementById('sa-not-configured');
+    const noRequest = document.getElementById('sa-no-request');
+    const content = document.getElementById('sa-content');
+
+    if (!data.configured) {
+      notConfigured.style.display = 'block';
+      noRequest.style.display = 'none';
+      content.style.display = 'none';
+      return;
+    }
+    notConfigured.style.display = 'none';
+
+    if (!data.last) {
+      noRequest.style.display = 'block';
+      content.style.display = 'none';
+      return;
+    }
+    noRequest.style.display = 'none';
+    content.style.display = 'block';
+
+    document.getElementById('sa-url').textContent = data.last.targetUrl;
+    document.getElementById('sa-requested-at').textContent = new Date(data.last.requestedAt).toLocaleString('ko-KR');
+
+    const overallEl = document.getElementById('sa-overall');
+    if (!data.run) {
+      overallEl.textContent = '실행 정보를 아직 가져오지 못했습니다 (잠시 후 갱신됩니다).';
+      overallEl.style.color = '#6b7280';
+      return;
+    }
+
+    const overall = saStatusLabel(data.run.status, data.run.conclusion);
+    overallEl.textContent = overall.text;
+    overallEl.style.color = overall.color;
+
+    const body = document.getElementById('sa-jobs-body');
+    body.innerHTML = '';
+    (data.jobs || []).forEach(function (j) {
+      const s = saStatusLabel(j.status, j.conclusion);
+      const tr = document.createElement('tr');
+      tr.innerHTML =
+        '<td>' + j.name + '</td>' +
+        '<td style="color:' + s.color + '">' + s.text + '</td>' +
+        '<td>' + saFormatDuration(j.startedAt, j.completedAt) + '</td>';
+      body.appendChild(tr);
+    });
+
+    document.getElementById('sa-run-link').innerHTML = data.run.htmlUrl
+      ? '<a href="' + data.run.htmlUrl + '" target="_blank" rel="noopener">GitHub Actions에서 자세히 보기 →</a>'
+      : '';
+
+    if (data.run.status === 'completed' && saPolling) {
+      clearInterval(saPolling);
+      saPolling = null;
+    }
+  }
+
+  function pollSiteAuditStatus() {
+    fetch('/admin/site-audit/status')
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        renderSiteAuditStatus(data);
+        // 아직 진행 중이면 폴링을 계속 유지
+        if (data.run && data.run.status !== 'completed' && !saPolling) {
+          saPolling = setInterval(pollSiteAuditStatus, 5000);
+        }
+      })
+      .catch(function () {});
+  }
+
+  pollSiteAuditStatus();
+</script>
+
 <h2>피드백 학습 현황</h2>
 <div class="stat-grid">
   <div class="stat-box"><div class="num"><%= stats.totalFeedback %></div><div class="label">총 피드백 수</div></div>

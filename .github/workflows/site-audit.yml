@@ -1,0 +1,65 @@
+name: Site Audit (URL 종합 점검)
+
+# 관리자 대시보드의 "웹사이트 검사" 폼에서 URL을 입력하면 workflow_dispatch로 트리거됨.
+# 대상 URL에 대해 기능(Playwright) / 성능(k6) / HTTP 응답(API) 검증을 순서대로 수행한다.
+on:
+  workflow_dispatch:
+    inputs:
+      target_url:
+        description: '점검할 웹사이트 URL'
+        required: true
+        type: string
+
+jobs:
+  functional-check:
+    name: "1. 기능 검증 (Playwright)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install Playwright
+        run: npm install --no-save --package-lock=false @playwright/test
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+      - name: Run site audit
+        run: npx playwright test --config=playwright.site-audit.config.js
+        env:
+          TARGET_URL: ${{ inputs.target_url }}
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: site-audit-playwright-report
+          path: playwright-report/
+          retention-days: 14
+
+  performance-check:
+    name: "2. 성능 검증 (k6)"
+    runs-on: ubuntu-latest
+    needs: functional-check
+    if: always()
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install k6
+        run: |
+          curl -sL https://github.com/grafana/k6/releases/download/v0.51.0/k6-v0.51.0-linux-amd64.tar.gz | tar xz
+          sudo mv k6-v0.51.0-linux-amd64/k6 /usr/local/bin/k6
+      - name: Run k6 load test against target URL
+        run: k6 run perf/site-audit-load-test.js
+        env:
+          TARGET_URL: ${{ inputs.target_url }}
+
+  http-check:
+    name: "3. API/HTTP 응답 검증"
+    runs-on: ubuntu-latest
+    needs: functional-check
+    if: always()
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Check HTTP response
+        run: node scripts/http-check.js "${{ inputs.target_url }}"
