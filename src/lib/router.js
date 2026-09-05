@@ -66,11 +66,21 @@ class Router {
       req.body = {};
     }
 
+    // HEAD 요청은 GET 라우트로 처리하되, 본문은 보내지 않는다 (HTTP 표준 동작).
+    // 외부 헬스체크/링크 검사 도구(예: Playwright request.head())가 HEAD를 사용하는 경우가 많아
+    // GET 전용 라우터라도 HEAD를 지원하지 않으면 정상 페이지가 전부 404로 오탐된다.
+    const isHeadRequest = req.method === 'HEAD';
+    const effectiveMethod = isHeadRequest ? 'GET' : req.method;
+
     for (const route of this.routes) {
-      if (route.method !== req.method) continue;
+      if (route.method !== effectiveMethod) continue;
       const params = matchPath(route.pattern, pathname);
       if (params) {
         req.params = params;
+        if (isHeadRequest) {
+          const originalEnd = res.end.bind(res);
+          res.end = (...args) => originalEnd();
+        }
         try {
           await route.handler(req, res);
         } catch (err) {
