@@ -8,6 +8,7 @@ const recommend = require('./services/recommend');
 const toolsService = require('./services/tools');
 const ci = require('./services/ci');
 const siteAudit = require('./services/siteAudit');
+const { parseJobLog } = require('./services/logParser');
 const { isAdmin, setAdminCookie, clearAdminCookie, requireAdmin } = require('./middleware/auth');
 const { getDB } = require('./db/store');
 const { seed } = require('./db/seed');
@@ -185,6 +186,7 @@ router.get('/admin/ci/status', (req, res) => {
           updatedAt: run.updated_at,
         },
         jobs: jobs.map(j => ({
+          id: j.id,
           name: j.name,
           status: j.status,
           conclusion: j.conclusion,
@@ -194,6 +196,23 @@ router.get('/admin/ci/status', (req, res) => {
       });
     } catch (err) {
       res.status(500).json({ configured: true, error: err.message });
+    }
+  });
+});
+
+router.get('/admin/ci/job/:jobId/detail', (req, res) => {
+  requireAdmin(req, res, async () => {
+    try {
+      const jobs = await (async () => {
+        const run = await ci.getLatestRun();
+        return run ? ci.getRunJobs(run.id) : [];
+      })();
+      const job = jobs.find(j => String(j.id) === req.params.jobId);
+      const logText = await ci.getJobLogs(req.params.jobId);
+      const parsed = parseJobLog(job ? job.name : '', logText);
+      res.json({ ok: true, ...parsed });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
     }
   });
 });
@@ -248,6 +267,7 @@ router.get('/admin/site-audit/status', (req, res) => {
           updatedAt: run.updated_at,
         },
         jobs: jobs.map(j => ({
+          id: j.id,
           name: j.name,
           status: j.status,
           conclusion: j.conclusion,
@@ -257,6 +277,21 @@ router.get('/admin/site-audit/status', (req, res) => {
       });
     } catch (err) {
       res.status(500).json({ configured: true, error: err.message });
+    }
+  });
+});
+
+router.get('/admin/site-audit/job/:jobId/detail', (req, res) => {
+  requireAdmin(req, res, async () => {
+    try {
+      const run = await ci.getLatestRun(siteAudit.SITE_AUDIT_WORKFLOW);
+      const jobs = run ? await ci.getRunJobs(run.id) : [];
+      const job = jobs.find(j => String(j.id) === req.params.jobId);
+      const logText = await ci.getJobLogs(req.params.jobId);
+      const parsed = parseJobLog(job ? job.name : '', logText);
+      res.json({ ok: true, ...parsed });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
     }
   });
 });

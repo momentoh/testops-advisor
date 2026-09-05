@@ -74,11 +74,24 @@
     (data.jobs || []).forEach(function (j) {
       const s = ciStatusLabel(j.status, j.conclusion);
       const tr = document.createElement('tr');
+      const canDetail = j.status === 'completed';
       tr.innerHTML =
         '<td>' + j.name + '</td>' +
-        '<td style="color:' + s.color + '">' + s.text + '</td>' +
+        '<td><span ' + (canDetail ? 'class="job-status-link" onclick="toggleCiDetail(\'' + j.id + '\')"' : '') +
+          ' style="color:' + s.color + (canDetail ? ';cursor:pointer;text-decoration:underline;' : '') + '">' + s.text + '</span></td>' +
         '<td>' + formatDuration(j.startedAt, j.completedAt) + '</td>';
       body.appendChild(tr);
+
+      if (canDetail) {
+        const detailTr = document.createElement('tr');
+        detailTr.id = 'ci-detail-row-' + j.id;
+        detailTr.style.display = 'none';
+        const detailTd = document.createElement('td');
+        detailTd.colSpan = 3;
+        detailTd.innerHTML = '<div class="job-detail-panel" id="ci-detail-panel-' + j.id + '">불러오는 중...</div>';
+        detailTr.appendChild(detailTd);
+        body.appendChild(detailTr);
+      }
     });
 
     linkBox.innerHTML = data.run.htmlUrl
@@ -98,6 +111,67 @@
       .then(renderCiStatus)
       .catch(function () {
         document.getElementById('ci-status-text').textContent = '상태 조회 중 오류가 발생했습니다.';
+      });
+  }
+
+  const ciDetailCache = {};
+
+  function renderJobDetailHtml(data) {
+    if (!data.ok) {
+      return '<div style="color:#dc2626; font-size:13px;">상세 정보를 불러오지 못했습니다: ' + (data.error || '알 수 없는 오류') + '</div>';
+    }
+    let html = '';
+    if (data.testCases && data.testCases.length) {
+      html += '<div style="font-weight:600; font-size:13px; margin-bottom:6px;">생성된 테스트케이스 (' + data.testCases.length + '개)</div>';
+      html += '<ul class="job-testcase-list">';
+      data.testCases.forEach(function (tc) {
+        const icon = tc.status === 'pass' ? '✅' : '❌';
+        const color = tc.status === 'pass' ? '#16a34a' : '#dc2626';
+        html += '<li style="color:' + color + '">' + icon + ' ' + tc.name + '</li>';
+      });
+      html += '</ul>';
+    }
+    if (data.metrics && data.metrics.length) {
+      html += '<div style="font-weight:600; font-size:13px; margin:10px 0 6px;">성능/지표 결과</div>';
+      html += '<table class="admin-table job-metrics-table"><tbody>';
+      data.metrics.forEach(function (m) {
+        html += '<tr><td>' + m.label + '</td><td>' + m.value + '</td></tr>';
+      });
+      html += '</tbody></table>';
+    }
+    if (!(data.testCases && data.testCases.length) && !(data.metrics && data.metrics.length)) {
+      html += '<div style="color:#9ca3af; font-size:13px;">추출된 테스트케이스/지표가 없습니다. 원본 로그를 확인해 주세요.</div>';
+    }
+    if (data.raw) {
+      html += '<details style="margin-top:10px;"><summary style="cursor:pointer; font-size:12px; color:#6b7280;">원본 로그 보기 (마지막 200줄)</summary>' +
+        '<pre style="max-height:300px; overflow:auto; background:#111827; color:#d1d5db; padding:10px; border-radius:6px; font-size:11px;">' +
+        data.raw.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</pre></details>';
+    }
+    return html || '<div style="color:#9ca3af; font-size:13px;">표시할 상세 정보가 없습니다.</div>';
+  }
+
+  function toggleCiDetail(jobId) {
+    const row = document.getElementById('ci-detail-row-' + jobId);
+    if (!row) return;
+    if (row.style.display !== 'none') {
+      row.style.display = 'none';
+      return;
+    }
+    row.style.display = '';
+    const panel = document.getElementById('ci-detail-panel-' + jobId);
+    if (ciDetailCache[jobId]) {
+      panel.innerHTML = renderJobDetailHtml(ciDetailCache[jobId]);
+      return;
+    }
+    panel.innerHTML = '불러오는 중...';
+    fetch('/admin/ci/job/' + jobId + '/detail')
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        ciDetailCache[jobId] = data;
+        panel.innerHTML = renderJobDetailHtml(data);
+      })
+      .catch(function (err) {
+        panel.innerHTML = '<div style="color:#dc2626; font-size:13px;">오류: ' + err.message + '</div>';
       });
   }
 
@@ -220,11 +294,24 @@
     (data.jobs || []).forEach(function (j) {
       const s = saStatusLabel(j.status, j.conclusion);
       const tr = document.createElement('tr');
+      const canDetail = j.status === 'completed';
       tr.innerHTML =
         '<td>' + j.name + '</td>' +
-        '<td style="color:' + s.color + '">' + s.text + '</td>' +
+        '<td><span ' + (canDetail ? 'class="job-status-link" onclick="toggleSaDetail(\'' + j.id + '\')"' : '') +
+          ' style="color:' + s.color + (canDetail ? ';cursor:pointer;text-decoration:underline;' : '') + '">' + s.text + '</span></td>' +
         '<td>' + saFormatDuration(j.startedAt, j.completedAt) + '</td>';
       body.appendChild(tr);
+
+      if (canDetail) {
+        const detailTr = document.createElement('tr');
+        detailTr.id = 'sa-detail-row-' + j.id;
+        detailTr.style.display = 'none';
+        const detailTd = document.createElement('td');
+        detailTd.colSpan = 3;
+        detailTd.innerHTML = '<div class="job-detail-panel" id="sa-detail-panel-' + j.id + '">불러오는 중...</div>';
+        detailTr.appendChild(detailTd);
+        body.appendChild(detailTr);
+      }
     });
 
     document.getElementById('sa-run-link').innerHTML = data.run.htmlUrl
@@ -248,6 +335,33 @@
         }
       })
       .catch(function () {});
+  }
+
+  const saDetailCache = {};
+
+  function toggleSaDetail(jobId) {
+    const row = document.getElementById('sa-detail-row-' + jobId);
+    if (!row) return;
+    if (row.style.display !== 'none') {
+      row.style.display = 'none';
+      return;
+    }
+    row.style.display = '';
+    const panel = document.getElementById('sa-detail-panel-' + jobId);
+    if (saDetailCache[jobId]) {
+      panel.innerHTML = renderJobDetailHtml(saDetailCache[jobId]);
+      return;
+    }
+    panel.innerHTML = '불러오는 중...';
+    fetch('/admin/site-audit/job/' + jobId + '/detail')
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        saDetailCache[jobId] = data;
+        panel.innerHTML = renderJobDetailHtml(data);
+      })
+      .catch(function (err) {
+        panel.innerHTML = '<div style="color:#dc2626; font-size:13px;">오류: ' + err.message + '</div>';
+      });
   }
 
   pollSiteAuditStatus();

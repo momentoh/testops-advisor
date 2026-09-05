@@ -190,6 +190,13 @@ table.admin-table th, table.admin-table td { padding: 10px 12px; border-bottom: 
 table.admin-table th { background: #f9fafb; font-weight: 700; }
 table.admin-table tr:last-child td { border-bottom: none; }
 
+.job-status-link:hover { opacity: 0.75; }
+.job-detail-panel { padding: 12px 14px; background: #f9fafb; border-radius: 8px; margin: 4px 0; }
+ul.job-testcase-list { list-style: none; margin: 0; padding: 0; font-size: 13px; }
+ul.job-testcase-list li { padding: 3px 0; }
+table.job-metrics-table { font-size: 12px; }
+table.job-metrics-table td:first-child { color: #6b7280; width: 40%; }
+
 .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin: 16px 0 28px; }
 .stat-box { background: #fff; border: 1px solid var(--border); border-radius: 10px; padding: 14px; text-align: center; }
 .stat-box .num { font-size: 24px; font-weight: 800; }
