@@ -10,11 +10,15 @@
  */
 
 // GitHub Actions 로그는 각 줄 앞에 ISO 타임스탬프가 붙어있다. 파싱 전 제거한다.
+// eslint-disable-next-line no-control-regex
+const ANSI_PATTERN = /\x1b\[[0-9;]*[a-zA-Z]/g;
+
 function stripTimestamps(text) {
   return text
     .split('\n')
     .map((line) => line.replace(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z\s*/, ''))
-    .join('\n');
+    .join('\n')
+    .replace(ANSI_PATTERN, '');
 }
 
 /** Jest 출력에서 개별 테스트(✓/✗ 또는 PASS/FAIL 목록)를 추출한다. */

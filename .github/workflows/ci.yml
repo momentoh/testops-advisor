@@ -21,7 +21,7 @@ jobs:
       - name: Install Jest
         run: npm install --no-save --package-lock=false jest
       - name: Run unit tests
-        run: npx jest --ci --colors
+        run: npx jest --ci --colors --verbose
 
   e2e-test:
     name: "2. 통합/E2E 테스트 (Playwright)"
