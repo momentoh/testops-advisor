@@ -69,9 +69,17 @@ function request(method, path, body) {
 function requestFollowRedirect(method, path, maxRedirects = 5) {
   return new Promise((resolve, reject) => {
     function go(currentPath, isAbsolute, redirectsLeft) {
-      const options = isAbsolute
-        ? new URL(currentPath)
-        : { hostname: API_HOST, path: currentPath };
+      let options;
+      if (isAbsolute) {
+        const u = new URL(currentPath);
+        options = {
+          hostname: u.hostname,
+          port: u.port || 443,
+          path: u.pathname + u.search,
+        };
+      } else {
+        options = { hostname: API_HOST, path: currentPath };
+      }
       const req = https.request(
         {
           ...options,
