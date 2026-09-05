@@ -12,11 +12,7 @@
     "test:perf": "k6 run perf/load-test.js"
   },
   "license": "MIT",
-  "dependencies": {
-    "xlsx": "^0.18.5",
-    "mammoth": "^1.8.0",
-    "pdf-parse": "^1.1.1"
-  },
+  "dependencies": {},
   "devDependencies": {
     "jest": "^29.7.0",
     "@playwright/test": "^1.48.0"

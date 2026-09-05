@@ -27,7 +27,6 @@ function defaultData() {
     feedback: [],       // 사용자 피드백 로그 (학습 데이터)
     admins: [],         // 관리자 계정 (해시 저장)
     siteAudits: [],     // 프론트 "웹사이트 검사" 폼으로 제출된 URL 감사 요청 이력
-    specTests: [],       // 명세 문서 업로드로 생성된 명세기반 블랙박스 테스트케이스 이력
   };
 }
 

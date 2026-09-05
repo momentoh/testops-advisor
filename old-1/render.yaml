@@ -4,7 +4,7 @@ services:
     runtime: node
     plan: free
     branch: main
-    buildCommand: "npm install && npm run seed"
+    buildCommand: "npm run seed"
     startCommand: "npm start"
     healthCheckPath: /healthz
     envVars:
@@ -22,7 +22,3 @@ services:
         value: ci.yml
       - key: GITHUB_BRANCH
         value: main
-      - key: ANTHROPIC_API_KEY
-        sync: false
-      - key: ANTHROPIC_MODEL
-        value: claude-sonnet-4-5

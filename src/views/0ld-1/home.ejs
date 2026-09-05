@@ -1,0 +1,67 @@
+<%- include('partials/head', { title }) %>
+
+<h1>테스트 프로세스별 자동화 에이전트 · MCP 추천</h1>
+<p class="lead">요구사항분석부터 배포/모니터링까지, SDLC 7단계에 맞는 자동화 도구를 추천합니다. 사용자 피드백이 쌓일수록 추천 품질이 점점 좋아집니다.</p>
+
+<h2>웹사이트 종합 검사</h2>
+<div class="card">
+  <p style="color:#6b7280; font-size:13px; margin-top:0;">
+    검사할 웹사이트 주소를 입력하면 기능(Playwright: 접속성·콘솔에러·깨진링크·접근성) · 성능(k6) · API/HTTP 응답 검증을 자동으로 실행합니다.
+    결과는 관리자 페이지에서 확인할 수 있습니다.
+  </p>
+  <form class="stack" id="site-audit-form" onsubmit="return submitSiteAudit(event)">
+    <label>웹사이트 주소</label>
+    <input type="url" id="site-audit-url" required placeholder="https://example.com">
+    <button class="btn" type="submit" id="site-audit-submit">검사 실행</button>
+  </form>
+  <div id="site-audit-message" style="margin-top:10px; font-size:13px;"></div>
+</div>
+
+<script>
+  function submitSiteAudit(e) {
+    e.preventDefault();
+    const btn = document.getElementById('site-audit-submit');
+    const msg = document.getElementById('site-audit-message');
+    const url = document.getElementById('site-audit-url').value;
+
+    btn.disabled = true;
+    msg.style.color = '#6b7280';
+    msg.textContent = '검사를 요청하는 중...';
+
+    fetch('/site-audit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+    })
+      .then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }); })
+      .then(function (result) {
+        if (!result.data.ok) {
+          msg.style.color = '#dc2626';
+          msg.textContent = '오류: ' + (result.data.error || '알 수 없는 오류');
+          btn.disabled = false;
+          return;
+        }
+        msg.style.color = '#16a34a';
+        msg.textContent = '검사가 시작되었습니다. 결과는 관리자 페이지에서 확인해 주세요.';
+        setTimeout(function () { btn.disabled = false; }, 3000);
+      })
+      .catch(function (err) {
+        msg.style.color = '#dc2626';
+        msg.textContent = '오류: ' + err.message;
+        btn.disabled = false;
+      });
+    return false;
+  }
+</script>
+
+<div class="stage-grid">
+  <% stages.forEach(function(stage) { %>
+    <a class="stage-card" href="/stages/<%= stage.id %>">
+      <span class="stage-order"><%= stage.order %></span>
+      <h3><%= stage.name %></h3>
+      <p><%= stage.description %></p>
+    </a>
+  <% }) %>
+</div>
+
+<%- include('partials/foot') %>

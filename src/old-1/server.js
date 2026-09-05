@@ -9,9 +9,6 @@ const toolsService = require('./services/tools');
 const ci = require('./services/ci');
 const siteAudit = require('./services/siteAudit');
 const { parseJobLog } = require('./services/logParser');
-const docParser = require('./services/docParser');
-const specTestGen = require('./services/specTestGen');
-const specTestStore = require('./services/specTestStore');
 const { isAdmin, setAdminCookie, clearAdminCookie, requireAdmin } = require('./middleware/auth');
 const { getDB } = require('./db/store');
 const { seed } = require('./db/seed');
@@ -297,56 +294,6 @@ router.get('/admin/site-audit/job/:jobId/detail', (req, res) => {
       res.status(500).json({ ok: false, error: err.message });
     }
   });
-});
-
-// ---------- 명세기반 블랙박스 테스트케이스 생성 (프론트 문서 업로드 폼) ----------
-// 엑셀/워드/PDF/텍스트 명세 문서를 업로드하면 ISO/IEC 25010(품질특성) · 25023(품질측정) ·
-// 29119(테스트 설계기법) 표준을 적용해 Claude API로 테스트케이스를 생성한다. 로그인 불필요.
-router.get('/spec-test/status', (req, res) => {
-  res.json({ configured: specTestGen.isConfigured(), items: specTestStore.getAll() });
-});
-
-router.post('/spec-test/upload', (req, res) => {
-  (async () => {
-    try {
-      if (!specTestGen.isConfigured()) {
-        return res.status(400).json({
-          ok: false,
-          error: 'ANTHROPIC_API_KEY 환경변수가 설정되지 않아 테스트케이스 생성 기능을 사용할 수 없습니다.',
-        });
-      }
-      const file = req.files && req.files.document;
-      if (!file || !file.data || file.data.length === 0) {
-        return res.status(400).json({ ok: false, error: '업로드된 파일이 없습니다.' });
-      }
-      if (file.data.length > specTestStore.MAX_FILE_BYTES) {
-        return res.status(400).json({ ok: false, error: '파일 크기가 너무 큽니다 (최대 10MB).' });
-      }
-
-      specTestStore.checkRateLimit();
-
-      const { text, format, truncated } = await docParser.extractText(file.data, file.filename);
-      const entry = specTestStore.createPending({ filename: file.filename, format });
-      res.json({ ok: true, id: entry.id, truncated });
-
-      // 생성 자체는 시간이 걸릴 수 있으므로 응답 후 백그라운드에서 처리하고 상태를 갱신한다.
-      specTestGen
-        .generateTestCases(text, format)
-        .then((result) => specTestStore.markDone(entry.id, result))
-        .catch((err) => specTestStore.markError(entry.id, err.message));
-    } catch (err) {
-      res.status(400).json({ ok: false, error: err.message });
-    }
-  })();
-});
-
-router.get('/spec-test/:id', (req, res) => {
-  const entry = specTestStore.getById(req.params.id);
-  if (!entry) {
-    res.statusCode = 404;
-    return res.json({ ok: false, error: '해당 요청을 찾을 수 없습니다.' });
-  }
-  res.json({ ok: true, item: entry });
 });
 
 // ---------- 헬스체크 (Render 등 배포 플랫폼용) ----------

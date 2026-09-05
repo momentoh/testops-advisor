@@ -61,12 +61,9 @@ class Router {
 
     // 바디 파싱 (POST)
     if (req.method === 'POST') {
-      const parsed = await parseBody(req);
-      req.body = parsed.fields;
-      req.files = parsed.files; // multipart/form-data인 경우에만 채워짐: { fieldName: { filename, mimeType, data(Buffer) } }
+      req.body = await parseBody(req);
     } else {
       req.body = {};
-      req.files = {};
     }
 
     // HEAD 요청은 GET 라우트로 처리하되, 본문은 보내지 않는다 (HTTP 표준 동작).
@@ -102,94 +99,24 @@ class Router {
 
 function parseBody(req) {
   return new Promise((resolve) => {
-    const contentType = req.headers['content-type'] || '';
-
-    if (contentType.includes('multipart/form-data')) {
-      const chunks = [];
-      req.on('data', (chunk) => chunks.push(chunk));
-      req.on('end', () => {
-        try {
-          const buffer = Buffer.concat(chunks);
-          resolve(parseMultipart(buffer, contentType));
-        } catch (e) {
-          resolve({ fields: {}, files: {} });
-        }
-      });
-      req.on('error', () => resolve({ fields: {}, files: {} }));
-      return;
-    }
-
     let data = '';
     req.on('data', chunk => { data += chunk; });
     req.on('end', () => {
+      const contentType = req.headers['content-type'] || '';
       try {
         if (contentType.includes('application/json')) {
-          resolve({ fields: data ? JSON.parse(data) : {}, files: {} });
+          resolve(data ? JSON.parse(data) : {});
         } else if (contentType.includes('application/x-www-form-urlencoded')) {
-          resolve({ fields: querystring.parse(data), files: {} });
+          resolve(querystring.parse(data));
         } else {
-          resolve({ fields: {}, files: {} });
+          resolve({});
         }
       } catch (e) {
-        resolve({ fields: {}, files: {} });
+        resolve({});
       }
     });
-    req.on('error', () => resolve({ fields: {}, files: {} }));
+    req.on('error', () => resolve({}));
   });
-}
-
-/**
- * multipart/form-data 바디를 파싱한다 (외부 라이브러리 없이 Buffer 기반 직접 구현).
- * 텍스트 필드는 fields에, 파일 파트는 files에 { filename, mimeType, data(Buffer) } 형태로 담는다.
- */
-function parseMultipart(buffer, contentType) {
-  const fields = {};
-  const files = {};
-
-  const boundaryMatch = contentType.match(/boundary=(?:"([^"]+)"|([^;]+))/);
-  if (!boundaryMatch) return { fields, files };
-  const boundary = '--' + (boundaryMatch[1] || boundaryMatch[2]).trim();
-  const boundaryBuf = Buffer.from(boundary);
-
-  // 바운더리 위치를 모두 찾아 파트 단위로 분리
-  const parts = [];
-  let start = buffer.indexOf(boundaryBuf, 0);
-  while (start !== -1) {
-    const next = buffer.indexOf(boundaryBuf, start + boundaryBuf.length);
-    if (next === -1) break;
-    // 각 파트는 boundary 뒤 \r\n 부터 다음 boundary 앞 \r\n 까지
-    let partStart = start + boundaryBuf.length;
-    if (buffer.slice(partStart, partStart + 2).toString() === '\r\n') partStart += 2;
-    let partEnd = next;
-    if (buffer.slice(partEnd - 2, partEnd).toString() === '\r\n') partEnd -= 2;
-    if (partEnd > partStart) parts.push(buffer.slice(partStart, partEnd));
-    start = next;
-  }
-
-  for (const part of parts) {
-    const headerEnd = part.indexOf('\r\n\r\n');
-    if (headerEnd === -1) continue;
-    const headerText = part.slice(0, headerEnd).toString('utf-8');
-    const body = part.slice(headerEnd + 4);
-
-    const nameMatch = headerText.match(/name="([^"]+)"/);
-    if (!nameMatch) continue;
-    const name = nameMatch[1];
-    const filenameMatch = headerText.match(/filename="([^"]*)"/);
-
-    if (filenameMatch && filenameMatch[1]) {
-      const mimeMatch = headerText.match(/Content-Type:\s*([^\r\n]+)/i);
-      files[name] = {
-        filename: filenameMatch[1],
-        mimeType: mimeMatch ? mimeMatch[1].trim() : 'application/octet-stream',
-        data: body,
-      };
-    } else {
-      fields[name] = body.toString('utf-8');
-    }
-  }
-
-  return { fields, files };
 }
 
 // res 헬퍼 확장
