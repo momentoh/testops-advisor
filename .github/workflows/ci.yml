@@ -60,7 +60,16 @@ jobs:
       - name: Start server
         run: |
           TESTOPS_DB_PATH=./data/perf-test-db.json PORT=3000 node src/server.js &
-          npx --yes wait-on http://127.0.0.1:3000/healthz --timeout 15000
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:3000/healthz > /dev/null; then
+              echo "서버 준비 완료 (시도 ${i}회)"
+              exit 0
+            fi
+            echo "서버 대기 중... (${i}/30)"
+            sleep 1
+          done
+          echo "서버가 30초 내에 응답하지 않았습니다."
+          exit 1
       - name: Install k6
         run: |
           curl -sL https://github.com/grafana/k6/releases/download/v0.51.0/k6-v0.51.0-linux-amd64.tar.gz | tar xz
