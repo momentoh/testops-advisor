@@ -102,10 +102,19 @@ describe('specTestStore (이력 관리 및 남용 방지)', () => {
     if (fs.existsSync(TEST_DB_PATH)) fs.unlinkSync(TEST_DB_PATH);
   });
 
-  test('요청을 processing 상태로 생성하고 done으로 갱신할 수 있다', () => {
+  test('업로드 시 승인 대기 상태로 생성되고, 승인 후 처리 중 -> 완료로 전이된다', () => {
     const store = require('../src/services/specTestStore');
-    const entry = store.createPending({ filename: 'req.docx', format: 'word' });
-    expect(entry.status).toBe('processing');
+    const entry = store.createPendingApproval({ filename: 'req.docx', format: 'word', previewText: '미리보기' });
+    expect(entry.status).toBe('pending_approval');
+    expect(entry.previewText).toBe('미리보기');
+
+    store.setFullText(entry.id, '전체 원문');
+    expect(store.getById(entry.id).fullText).toBe('전체 원문');
+    // 공개용 조회에는 원문 텍스트가 노출되지 않는다.
+    expect(store.getByIdPublic(entry.id).fullText).toBeUndefined();
+
+    store.markApprovedProcessing(entry.id);
+    expect(store.getById(entry.id).status).toBe('processing');
 
     store.markDone(entry.id, {
       summary: '로그인 기능 요구사항 문서',
@@ -116,11 +125,26 @@ describe('specTestStore (이력 관리 및 남용 방지)', () => {
     expect(updated.status).toBe('done');
     expect(updated.testCases).toHaveLength(1);
     expect(updated.summary).toBe('로그인 기능 요구사항 문서');
+    // 생성 완료 후에는 원문 텍스트를 더 이상 보관하지 않는다.
+    expect(updated.fullText).toBeNull();
+  });
+
+  test('관리자가 반려하면 원문 없이 반려 상태로 남고 Claude API를 호출하지 않는다', () => {
+    const store = require('../src/services/specTestStore');
+    const entry = store.createPendingApproval({ filename: 'skip.txt', format: 'text', previewText: '미리보기2' });
+    store.setFullText(entry.id, '전체 원문2');
+
+    store.markRejected(entry.id, '관리자가 반려했습니다.');
+
+    const updated = store.getById(entry.id);
+    expect(updated.status).toBe('rejected');
+    expect(updated.error).toBe('관리자가 반려했습니다.');
+    expect(updated.fullText).toBeNull();
   });
 
   test('요청을 error 상태로 갱신할 수 있다', () => {
     const store = require('../src/services/specTestStore');
-    const entry = store.createPending({ filename: 'broken.pdf', format: 'pdf' });
+    const entry = store.createPendingApproval({ filename: 'broken.pdf', format: 'pdf' });
     store.markError(entry.id, 'Claude API 오류 (500): 서버 내부 오류');
 
     const updated = store.getById(entry.id);
@@ -130,7 +154,7 @@ describe('specTestStore (이력 관리 및 남용 방지)', () => {
 
   test('최소 재요청 간격 이내에는 checkRateLimit이 예외를 던진다', () => {
     const store = require('../src/services/specTestStore');
-    store.createPending({ filename: 'a.txt', format: 'text' });
+    store.createPendingApproval({ filename: 'a.txt', format: 'text' });
     expect(() => store.checkRateLimit()).toThrow(/너무 잦은 요청/);
   });
 });
