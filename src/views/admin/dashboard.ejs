@@ -177,9 +177,20 @@
     box.innerHTML = html;
   }
 
+  let reqAdminOpenId = null; // 현재 펼쳐진 항목의 id (홀수 번째 클릭=펼침, 짝수 번째 클릭=닫힘 토글용)
+
   function viewReqAdminItem(id) {
     const item = reqAdminCache[id];
     if (!item) return;
+    const box = document.getElementById('req-admin-detail');
+    if (reqAdminOpenId === id) {
+      // 같은 항목을 다시 클릭(짝수 번째) -> 원래 상태로 복원(닫기)
+      reqAdminOpenId = null;
+      box.style.display = 'none';
+      box.innerHTML = '';
+      return;
+    }
+    reqAdminOpenId = id;
     renderReqAdminDetail(item);
     document.getElementById('req-admin-detail').scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
@@ -384,9 +395,19 @@
     box.innerHTML = html;
   }
 
+  let specAdminOpenId = null; // 현재 펼쳐진 항목의 id (홀수 번째 클릭=펼침, 짝수 번째 클릭=닫힘 토글용)
+
   function viewSpecAdminItem(id) {
     const item = specAdminCache[id];
     if (!item) return;
+    const box = document.getElementById('spec-admin-detail');
+    if (specAdminOpenId === id) {
+      specAdminOpenId = null;
+      box.style.display = 'none';
+      box.innerHTML = '';
+      return;
+    }
+    specAdminOpenId = id;
     renderSpecAdminDetail(item);
     document.getElementById('spec-admin-detail').scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
@@ -849,9 +870,20 @@
     ciTestDetailPolling = setInterval(fetchRunStatus, 5000);
   }
 
+  let ciTestOpenId = null; // 현재 펼쳐진 항목의 id (홀수 번째 클릭=펼침, 짝수 번째 클릭=닫힘 토글용)
+
   function viewCiTestItem(id) {
     const item = ciTestCache[id];
     if (!item) return;
+    const box = document.getElementById('ci-test-detail');
+    if (ciTestOpenId === id) {
+      ciTestOpenId = null;
+      if (ciTestDetailPolling) { clearInterval(ciTestDetailPolling); ciTestDetailPolling = null; }
+      box.style.display = 'none';
+      box.innerHTML = '';
+      return;
+    }
+    ciTestOpenId = id;
     renderCiTestDetail(item);
     document.getElementById('ci-test-detail').scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
