@@ -12,6 +12,7 @@ const { parseJobLog } = require('./services/logParser');
 const docParser = require('./services/docParser');
 const specTestGen = require('./services/specTestGen');
 const specTestStore = require('./services/specTestStore');
+const ciTestStore = require('./services/ciTestStore');
 const { isAdmin, setAdminCookie, clearAdminCookie, requireAdmin } = require('./middleware/auth');
 const { getDB } = require('./db/store');
 const { seed } = require('./db/seed');
@@ -233,6 +234,159 @@ router.post('/admin/ci/trigger', (req, res) => {
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });
     }
+  });
+});
+
+// ---------- CI/CD 파이프라인 실행 "요청" (프론트 홈페이지 폼) ----------
+// 단위테스트(Jest) -> 통합/E2E(Playwright) -> 성능(k6) -> 보안점검(npm audit) 파이프라인은
+// GitHub Actions 실행 1회당 실제 컴퓨팅 자원을 소모하므로, 누구나 대상 URL/요청사항을 남겨
+// 실행을 "요청"할 수 있게 하되, 실제 실행은 관리자가 승인해야만 시작된다 (승인 전까지 미실행).
+router.post('/ci-test/request', (req, res) => {
+  (async () => {
+    try {
+      const { targetUrl, requirements } = req.body || {};
+      if (targetUrl && !siteAudit.isValidUrl(targetUrl)) {
+        return res.status(400).json({ ok: false, error: '올바른 URL 형식이 아닙니다. (예: https://example.com)' });
+      }
+      if (!requirements || !requirements.trim()) {
+        return res.status(400).json({ ok: false, error: '요청사항을 입력해 주세요.' });
+      }
+      ciTestStore.checkRateLimit();
+      const entry = ciTestStore.createPendingApproval({ targetUrl, requirements: requirements.trim() });
+      res.json({ ok: true, id: entry.id, pendingApproval: true });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err.message });
+    }
+  })();
+});
+
+router.get('/ci-test/status', (req, res) => {
+  if (!isAdmin(req)) {
+    res.statusCode = 401;
+    return res.json({ ok: false, error: '관리자 로그인이 필요합니다.' });
+  }
+  res.json({ configured: ci.isConfigured(), items: ciTestStore.getAll() });
+});
+
+router.get('/ci-test/:id', (req, res) => {
+  if (!isAdmin(req)) {
+    res.statusCode = 401;
+    return res.json({ ok: false, error: '관리자 로그인이 필요합니다.' });
+  }
+  const entry = ciTestStore.getById(req.params.id);
+  if (!entry) {
+    res.statusCode = 404;
+    return res.json({ ok: false, error: '해당 요청을 찾을 수 없습니다.' });
+  }
+  res.json({ ok: true, item: entry });
+});
+
+// 실행 중인 요청의 실시간 GitHub Actions 잡 상태를 조회한다 (연결된 runId 기준).
+router.get('/admin/ci-test/:id/run-status', (req, res) => {
+  requireAdmin(req, res, async () => {
+    try {
+      const entry = ciTestStore.getById(req.params.id);
+      if (!entry) return res.status(404).json({ ok: false, error: '해당 요청을 찾을 수 없습니다.' });
+      if (!entry.runId) return res.json({ ok: true, run: null, jobs: [] });
+
+      const runSummary = await ci.getRunSummary(entry.runId);
+      const jobs = await ci.getRunJobs(entry.runId);
+
+      // 실행이 끝났다면 이력에도 최종 결론을 반영한다.
+      if (runSummary && runSummary.status === 'completed' && entry.status === 'running') {
+        ciTestStore.markDone(entry.id, runSummary.conclusion);
+      }
+
+      res.json({
+        ok: true,
+        run: runSummary && {
+          id: runSummary.id,
+          status: runSummary.status,
+          conclusion: runSummary.conclusion,
+          htmlUrl: runSummary.html_url,
+        },
+        jobs: jobs.map((j) => ({
+          id: j.id,
+          name: j.name,
+          status: j.status,
+          conclusion: j.conclusion,
+          startedAt: j.started_at,
+          completedAt: j.completed_at,
+        })),
+      });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+});
+
+router.get('/admin/ci-test/:id/job/:jobId/detail', (req, res) => {
+  requireAdmin(req, res, async () => {
+    try {
+      const logText = await ci.getJobLogs(req.params.jobId);
+      const entry = ciTestStore.getById(req.params.id);
+      const jobs = entry && entry.runId ? await ci.getRunJobs(entry.runId) : [];
+      const job = jobs.find((j) => String(j.id) === req.params.jobId);
+      const parsed = parseJobLog(job ? job.name : '', logText);
+      res.json({ ok: true, ...parsed });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+});
+
+// 관리자 승인: 이 시점부터 실제로 GitHub Actions 파이프라인이 트리거되어 컴퓨팅 자원을 소모한다.
+router.post('/admin/ci-test/:id/approve', (req, res) => {
+  requireAdmin(req, res, async () => {
+    try {
+      if (!ci.isConfigured()) {
+        return res.status(400).json({ ok: false, error: 'GITHUB_TOKEN / GITHUB_REPO 환경변수가 설정되지 않았습니다.' });
+      }
+      const entry = ciTestStore.getById(req.params.id);
+      if (!entry) return res.status(404).json({ ok: false, error: '해당 요청을 찾을 수 없습니다.' });
+      if (entry.status !== 'pending_approval') {
+        return res.status(400).json({ ok: false, error: '승인 대기 상태의 요청이 아닙니다.' });
+      }
+
+      const dispatchedAt = Date.now();
+      await ci.triggerWorkflow();
+      res.json({ ok: true, message: '승인되었습니다. GitHub Actions 실행을 시작합니다.' });
+
+      // GitHub의 workflow_dispatch 응답에는 run id가 포함되지 않으므로,
+      // 방금 만들어진 실행을 짧게 재시도하며 찾아 이 요청과 연결한다.
+      (async () => {
+        for (let i = 0; i < 8; i += 1) {
+          await new Promise((r) => setTimeout(r, 2000));
+          try {
+            const run = await ci.getLatestRun();
+            if (run && new Date(run.created_at).getTime() >= dispatchedAt - 5000) {
+              ciTestStore.markApprovedRunning(entry.id, { runId: run.id, runHtmlUrl: run.html_url });
+              return;
+            }
+          } catch (e) {
+            // 다음 재시도에서 계속 확인
+          }
+        }
+        // 끝까지 못 찾았어도 승인 시각은 남기고, 관리자가 GitHub Actions에서 직접 확인할 수 있게 안내
+        ciTestStore.markApprovedRunning(entry.id, { runId: null, runHtmlUrl: null });
+      })();
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+});
+
+// 관리자 반려: GitHub Actions를 실행하지 않으므로 컴퓨팅 자원이 소모되지 않는다.
+router.post('/admin/ci-test/:id/reject', (req, res) => {
+  requireAdmin(req, res, () => {
+    const entry = ciTestStore.getById(req.params.id);
+    if (!entry) return res.status(404).json({ ok: false, error: '해당 요청을 찾을 수 없습니다.' });
+    if (entry.status !== 'pending_approval') {
+      return res.status(400).json({ ok: false, error: '승인 대기 상태의 요청이 아닙니다.' });
+    }
+    const reason = (req.body && req.body.reason) || '관리자가 반려했습니다.';
+    ciTestStore.markRejected(entry.id, reason);
+    res.json({ ok: true });
   });
 });
 
