@@ -74,6 +74,82 @@
   }
 </script>
 
+<h2>요구사양서 리뷰</h2>
+<div class="card">
+  <p style="color:#6b7280; font-size:13px; margin-top:0;">
+    요구사양서(엑셀 .xlsx, 워드 .docx, PDF, 텍스트 .txt/.csv/.md)를 업로드하면 AI가 문서를 분석해
+    <strong>ISO/IEC/IEEE 29148</strong>(요구공학) · <strong>IEEE 830</strong>(SRS 권고사항) · <strong>ISO/IEC 25030</strong>(품질요구사항) ·
+    <strong>ISO/IEC 25010</strong>(품질특성) · <strong>ISO/IEC 12207</strong>(SW 생명주기 프로세스) 5개 표준을 기준으로
+    요구사항의 완전성·명확성·검증가능성·추적가능성 등을 점검하고 개선 제안을 도출합니다.
+    AI 리뷰에는 비용(토큰)이 소요되므로, 업로드 후 <strong>관리자 승인</strong>을 거쳐야 실제 리뷰가 시작됩니다.
+    리뷰 결과는 관리자 페이지에서 확인할 수 있습니다.
+  </p>
+  <div id="req-not-configured" style="display:none; padding:12px; background:#fef3c7; border-radius:8px; font-size:13px; margin-bottom:12px;">
+    AI 연동이 설정되지 않았습니다. 관리자에게 <code>ANTHROPIC_API_KEY</code> 환경변수 설정을 요청해 주세요.
+  </div>
+  <form class="stack" id="req-review-form" onsubmit="return submitReqReview(event)">
+    <label>요구사양서 파일</label>
+    <input type="file" id="req-review-file" accept=".xlsx,.xls,.docx,.pdf,.txt,.csv,.md" required>
+    <button class="btn" type="submit" id="req-review-submit">리뷰 요청</button>
+  </form>
+  <div id="req-review-message" style="margin-top:10px; font-size:13px;"></div>
+</div>
+
+<script>
+  function reqStatusCheck() {
+    fetch('/req-review/status')
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data && data.configured === false) {
+          document.getElementById('req-not-configured').style.display = 'block';
+          document.getElementById('req-review-submit').disabled = true;
+        }
+      })
+      .catch(function () {
+        // 비관리자는 /req-review/status 조회 권한이 없어(401) 여기로 올 수 있다. 업로드 자체는 계속 가능하다.
+      });
+  }
+  reqStatusCheck();
+
+  function submitReqReview(e) {
+    e.preventDefault();
+    const btn = document.getElementById('req-review-submit');
+    const msg = document.getElementById('req-review-message');
+    const fileInput = document.getElementById('req-review-file');
+    if (!fileInput.files.length) return false;
+
+    btn.disabled = true;
+    msg.style.color = '#6b7280';
+    msg.textContent = '파일을 업로드하는 중...';
+
+    const formData = new FormData();
+    formData.append('document', fileInput.files[0]);
+
+    fetch('/req-review/upload', { method: 'POST', body: formData })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (!data.ok) {
+          msg.style.color = '#dc2626';
+          msg.textContent = '오류: ' + (data.error || '알 수 없는 오류');
+          btn.disabled = false;
+          return;
+        }
+        msg.style.color = '#16a34a';
+        msg.textContent = data.truncated
+          ? '업로드 완료 (문서가 길어 일부 내용만 사용됩니다). 관리자 승인 후 리뷰가 시작됩니다.'
+          : '업로드 완료. 관리자 승인 후 리뷰가 시작됩니다.';
+        setTimeout(function () { btn.disabled = false; }, 3000);
+        fileInput.value = '';
+      })
+      .catch(function (err) {
+        msg.style.color = '#dc2626';
+        msg.textContent = '오류: ' + err.message;
+        btn.disabled = false;
+      });
+    return false;
+  }
+</script>
+
 <h2>웹사이트 종합 검사</h2>
 <div class="card">
   <p style="color:#6b7280; font-size:13px; margin-top:0;">

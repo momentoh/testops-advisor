@@ -13,6 +13,8 @@ const docParser = require('./services/docParser');
 const specTestGen = require('./services/specTestGen');
 const specTestStore = require('./services/specTestStore');
 const ciTestStore = require('./services/ciTestStore');
+const reqReviewGen = require('./services/reqReviewGen');
+const reqReviewStore = require('./services/reqReviewStore');
 const { isAdmin, setAdminCookie, clearAdminCookie, requireAdmin } = require('./middleware/auth');
 const { getDB } = require('./db/store');
 const { seed } = require('./db/seed');
@@ -550,6 +552,106 @@ router.post('/admin/spec-test/:id/reject', (req, res) => {
     }
     const reason = (req.body && req.body.reason) || '관리자가 반려했습니다.';
     specTestStore.markRejected(entry.id, reason);
+    res.json({ ok: true });
+  });
+});
+
+// ---------- 요구사양서(SRS) 리뷰 (프론트 문서 업로드 폼) ----------
+// 엑셀/워드/PDF/텍스트 요구사양서를 업로드하면 ISO/IEC/IEEE 29148(요구공학) · IEEE 830(SRS 권고사항) ·
+// ISO/IEC 25030(품질요구사항) · ISO/IEC 25010(품질특성) · ISO/IEC 12207(SW 생명주기 프로세스)
+// 5개 표준을 기준으로 Claude API가 리뷰 결과를 생성한다.
+// Claude API 호출은 토큰(비용)을 소모하므로, 업로드는 로그인 없이 가능하되
+// 실제 리뷰는 관리자가 문서 내용을 확인하고 승인해야만 실행된다 (승인 전까지 API 미호출).
+router.get('/req-review/status', (req, res) => {
+  if (!isAdmin(req)) {
+    res.statusCode = 401;
+    return res.json({ ok: false, error: '관리자 로그인이 필요합니다.' });
+  }
+  res.json({ configured: reqReviewGen.isConfigured(), items: reqReviewStore.getAllPublic() });
+});
+
+router.post('/req-review/upload', (req, res) => {
+  (async () => {
+    try {
+      if (!reqReviewGen.isConfigured()) {
+        return res.status(400).json({
+          ok: false,
+          error: 'ANTHROPIC_API_KEY 환경변수가 설정되지 않아 요구사항 리뷰 기능을 사용할 수 없습니다.',
+        });
+      }
+      const file = req.files && req.files.document;
+      if (!file || !file.data || file.data.length === 0) {
+        return res.status(400).json({ ok: false, error: '업로드된 파일이 없습니다.' });
+      }
+      // 업로드 자체는 로그인 없이 누구나 가능하며, 실제 리뷰(토큰 소모)는 관리자 승인이 필요하다.
+      if (file.data.length > reqReviewStore.MAX_FILE_BYTES) {
+        return res.status(400).json({ ok: false, error: '파일 크기가 너무 큽니다 (최대 10MB).' });
+      }
+
+      reqReviewStore.checkRateLimit();
+
+      const { text, format, truncated } = await docParser.extractText(file.data, file.filename);
+      const preview = docParser.makePreview(text);
+      const entry = reqReviewStore.createPendingApproval({ filename: file.filename, format, previewText: preview });
+      // 승인 전까지 실제 리뷰에 쓸 원문 텍스트를 DB에 임시 보관한다 (승인/거부 시 정리됨).
+      reqReviewStore.setFullText(entry.id, text);
+      res.json({ ok: true, id: entry.id, truncated, pendingApproval: true });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err.message });
+    }
+  })();
+});
+
+router.get('/req-review/:id', (req, res) => {
+  if (!isAdmin(req)) {
+    res.statusCode = 401;
+    return res.json({ ok: false, error: '관리자 로그인이 필요합니다.' });
+  }
+  const entry = reqReviewStore.getByIdPublic(req.params.id);
+  if (!entry) {
+    res.statusCode = 404;
+    return res.json({ ok: false, error: '해당 요청을 찾을 수 없습니다.' });
+  }
+  res.json({ ok: true, item: entry });
+});
+
+// 관리자 승인: 이 시점부터 실제로 Claude API를 호출해 토큰을 소모하며 리뷰 결과를 생성한다.
+router.post('/admin/req-review/:id/approve', (req, res) => {
+  requireAdmin(req, res, () => {
+    const entry = reqReviewStore.getById(req.params.id);
+    if (!entry) {
+      res.statusCode = 404;
+      return res.json({ ok: false, error: '해당 요청을 찾을 수 없습니다.' });
+    }
+    if (entry.status !== 'pending_approval') {
+      return res.status(400).json({ ok: false, error: '승인 대기 상태의 요청이 아닙니다.' });
+    }
+    const fullText = entry.fullText;
+    const format = entry.format;
+    reqReviewStore.markApprovedProcessing(entry.id);
+    res.json({ ok: true });
+
+    // 리뷰 자체는 시간이 걸릴 수 있으므로 응답 후 백그라운드에서 처리하고 상태를 갱신한다.
+    reqReviewGen
+      .reviewRequirements(fullText, format)
+      .then((result) => reqReviewStore.markDone(entry.id, result))
+      .catch((err) => reqReviewStore.markError(entry.id, err.message));
+  });
+});
+
+// 관리자 반려: Claude API를 호출하지 않으므로 토큰이 소모되지 않는다.
+router.post('/admin/req-review/:id/reject', (req, res) => {
+  requireAdmin(req, res, () => {
+    const entry = reqReviewStore.getById(req.params.id);
+    if (!entry) {
+      res.statusCode = 404;
+      return res.json({ ok: false, error: '해당 요청을 찾을 수 없습니다.' });
+    }
+    if (entry.status !== 'pending_approval') {
+      return res.status(400).json({ ok: false, error: '승인 대기 상태의 요청이 아닙니다.' });
+    }
+    const reason = (req.body && req.body.reason) || '관리자가 반려했습니다.';
+    reqReviewStore.markRejected(entry.id, reason);
     res.json({ ok: true });
   });
 });
