@@ -176,6 +176,12 @@ describe('pg.js (DATABASE_URL 미설정 시 pg 패키지를 로드하지 않는�
   beforeEach(() => {
     delete process.env.DATABASE_URL;
     jest.resetModules();
+    // 위 describe 블록들에서 jest.doMock('../src/db/pg', ...)으로 등록한 모의 모듈은
+    // jest.resetModules()로도 해제되지 않고(캐시된 "인스턴스"만 지워질 뿐, 모의 "매핑"은
+    // 그대로 남아 다음 require 시 팩토리가 다시 실행된다) 계속 살아남아 실제 pg.js 대신
+    // isConfigured: () => true 인 mock이 반환되는 문제가 있었다. 실제 구현 모듈을
+    // 사용하도록 명시적으로 모의 등록을 해제한다.
+    jest.dontMock('../src/db/pg');
   });
 
   test('isConfigured()는 false를 반환하고, loadState/saveState는 즉시 안전하게 반환한다', async () => {
