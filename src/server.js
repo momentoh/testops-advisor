@@ -15,6 +15,7 @@ const specTestStore = require('./services/specTestStore');
 const ciTestStore = require('./services/ciTestStore');
 const reqReviewGen = require('./services/reqReviewGen');
 const reqReviewStore = require('./services/reqReviewStore');
+const reportExporter = require('./services/reportExporter');
 const { isAdmin, setAdminCookie, clearAdminCookie, requireAdmin } = require('./middleware/auth');
 const { getDB } = require('./db/store');
 const { seed } = require('./db/seed');
@@ -515,6 +516,54 @@ router.get('/spec-test/:id', (req, res) => {
   res.json({ ok: true, item: entry });
 });
 
+// 완료된 테스트케이스 생성 결과를 엑셀/워드/HTML 파일로 내보낸다 (관리자 전용).
+// PDF는 서버 자원(Render 무료 플랜) 부담을 피하기 위해 별도 생성 없이,
+// 'html' 포맷으로 받은 인쇄용 페이지를 브라우저에서 Ctrl+P로 저장하도록 안내한다.
+router.get('/admin/spec-test/:id/export/:format', (req, res) => {
+  requireAdmin(req, res, () => {
+    const entry = specTestStore.getById(req.params.id);
+    if (!entry) {
+      res.statusCode = 404;
+      return res.json({ ok: false, error: '해당 요청을 찾을 수 없습니다.' });
+    }
+    if (entry.status !== 'done') {
+      return res.status(400).json({ ok: false, error: '완료된 결과만 내보낼 수 있습니다.' });
+    }
+    const format = req.params.format;
+    const report = reportExporter.buildSpecTestReport(entry);
+    const baseName = `spec-test-${entry.id.slice(0, 8)}`;
+    try {
+      if (format === 'xlsx') {
+        const buf = reportExporter.toXlsxBuffer(report);
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', `attachment; filename="${baseName}.xlsx"`);
+        return res.end(buf);
+      }
+      if (format === 'docx') {
+        const buf = reportExporter.toDocxBuffer(report);
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+        res.setHeader('Content-Disposition', `attachment; filename="${baseName}.docx"`);
+        return res.end(buf);
+      }
+      if (format === 'html') {
+        const html = reportExporter.toHtml(report);
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="${baseName}.html"`);
+        return res.end(html);
+      }
+      if (format === 'print') {
+        // 다운로드가 아니라 새 탭에서 바로 열어 Ctrl+P로 PDF 저장할 수 있도록 인라인으로 반환한다.
+        const html = reportExporter.toPrintableHtml(report);
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        return res.end(html);
+      }
+      return res.status(400).json({ ok: false, error: '지원하지 않는 형식입니다. (xlsx, docx, html, print 중 선택)' });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+});
+
 // 관리자 승인: 이 시점부터 실제로 Claude API를 호출해 토큰을 소모하며 테스트케이스를 생성한다.
 router.post('/admin/spec-test/:id/approve', (req, res) => {
   requireAdmin(req, res, () => {
@@ -613,6 +662,53 @@ router.get('/req-review/:id', (req, res) => {
     return res.json({ ok: false, error: '해당 요청을 찾을 수 없습니다.' });
   }
   res.json({ ok: true, item: entry });
+});
+
+// 완료된 리뷰 결과를 엑셀/워드/HTML 파일로 내보낸다 (관리자 전용).
+// PDF는 서버 자원(Render 무료 플랜) 부담을 피하기 위해 별도 생성 없이,
+// 'print' 포맷으로 받은 인쇄용 페이지를 브라우저에서 Ctrl+P로 저장하도록 안내한다.
+router.get('/admin/req-review/:id/export/:format', (req, res) => {
+  requireAdmin(req, res, () => {
+    const entry = reqReviewStore.getById(req.params.id);
+    if (!entry) {
+      res.statusCode = 404;
+      return res.json({ ok: false, error: '해당 요청을 찾을 수 없습니다.' });
+    }
+    if (entry.status !== 'done') {
+      return res.status(400).json({ ok: false, error: '완료된 결과만 내보낼 수 있습니다.' });
+    }
+    const format = req.params.format;
+    const report = reportExporter.buildReqReviewReport(entry);
+    const baseName = `req-review-${entry.id.slice(0, 8)}`;
+    try {
+      if (format === 'xlsx') {
+        const buf = reportExporter.toXlsxBuffer(report);
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', `attachment; filename="${baseName}.xlsx"`);
+        return res.end(buf);
+      }
+      if (format === 'docx') {
+        const buf = reportExporter.toDocxBuffer(report);
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+        res.setHeader('Content-Disposition', `attachment; filename="${baseName}.docx"`);
+        return res.end(buf);
+      }
+      if (format === 'html') {
+        const html = reportExporter.toHtml(report);
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="${baseName}.html"`);
+        return res.end(html);
+      }
+      if (format === 'print') {
+        const html = reportExporter.toPrintableHtml(report);
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        return res.end(html);
+      }
+      return res.status(400).json({ ok: false, error: '지원하지 않는 형식입니다. (xlsx, docx, html, print 중 선택)' });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
 });
 
 // 관리자 승인: 이 시점부터 실제로 Claude API를 호출해 토큰을 소모하며 리뷰 결과를 생성한다.

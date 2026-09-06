@@ -98,7 +98,14 @@
       return;
     }
 
-    let html = '<p style="font-size:13px; background:#f9fafb; padding:10px 12px; border-radius:8px;">' +
+    let html = '<div style="margin-bottom:10px;">' +
+      '<a class="btn secondary" style="padding:4px 10px; font-size:12px; text-decoration:none;" href="/admin/req-review/' + item.id + '/export/xlsx">엑셀로 내보내기</a> ' +
+      '<a class="btn secondary" style="padding:4px 10px; font-size:12px; text-decoration:none;" href="/admin/req-review/' + item.id + '/export/docx">워드로 내보내기</a> ' +
+      '<a class="btn secondary" style="padding:4px 10px; font-size:12px; text-decoration:none;" href="/admin/req-review/' + item.id + '/export/html">HTML로 내보내기</a> ' +
+      '<a class="btn secondary" style="padding:4px 10px; font-size:12px; text-decoration:none;" href="/admin/req-review/' + item.id + '/export/print" target="_blank">PDF로 저장 (인쇄용 페이지 열기)</a>' +
+      '</div>';
+
+    html += '<p style="font-size:13px; background:#f9fafb; padding:10px 12px; border-radius:8px;">' +
       '<strong>문서 요약:</strong> ' + item.summary + '<br>' +
       '<strong>전체 총평:</strong> ' + reqScoreBadge(item.overallScore) +
       '</p>';
@@ -274,7 +281,14 @@
       return;
     }
 
-    let html = '<p style="font-size:13px; background:#f9fafb; padding:10px 12px; border-radius:8px;"><strong>문서 요약:</strong> ' + item.summary + '</p>';
+    let html = '<div style="margin-bottom:10px;">' +
+      '<a class="btn secondary" style="padding:4px 10px; font-size:12px; text-decoration:none;" href="/admin/spec-test/' + item.id + '/export/xlsx">엑셀로 내보내기</a> ' +
+      '<a class="btn secondary" style="padding:4px 10px; font-size:12px; text-decoration:none;" href="/admin/spec-test/' + item.id + '/export/docx">워드로 내보내기</a> ' +
+      '<a class="btn secondary" style="padding:4px 10px; font-size:12px; text-decoration:none;" href="/admin/spec-test/' + item.id + '/export/html">HTML로 내보내기</a> ' +
+      '<a class="btn secondary" style="padding:4px 10px; font-size:12px; text-decoration:none;" href="/admin/spec-test/' + item.id + '/export/print" target="_blank">PDF로 저장 (인쇄용 페이지 열기)</a>' +
+      '</div>';
+
+    html += '<p style="font-size:13px; background:#f9fafb; padding:10px 12px; border-radius:8px;"><strong>문서 요약:</strong> ' + item.summary + '</p>';
     html += '<table class="admin-table"><thead><tr><th>ID</th><th>제목 / 요구사항</th><th>표준 매핑</th><th>절차 · 데이터 · 기대결과</th><th>우선순위</th></tr></thead><tbody>';
     (item.testCases || []).forEach(function (tc) {
       const steps = (tc.steps || []).map(function (s) { return '<li>' + s + '</li>'; }).join('');
