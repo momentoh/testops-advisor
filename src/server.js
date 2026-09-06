@@ -17,19 +17,11 @@ const reqReviewGen = require('./services/reqReviewGen');
 const reqReviewStore = require('./services/reqReviewStore');
 const reportExporter = require('./services/reportExporter');
 const { isAdmin, setAdminCookie, clearAdminCookie, requireAdmin } = require('./middleware/auth');
-const { getDB } = require('./db/store');
+const { getDB, initAsync } = require('./db/store');
 const { seed } = require('./db/seed');
 
-// 최초 배포 시 data/db.json이 없거나 비어있으면 자동으로 시드 데이터를 채운다.
-(function ensureSeeded() {
-  const db = getDB();
-  if (!db.stages || db.stages.length === 0) {
-    console.log('[bootstrap] 초기 데이터가 없어 시드 데이터를 생성합니다.');
-    seed();
-  }
-})();
-
 // --- 아주 단순한 .env 로더 (외부 dotenv 패키지 없이) ---
+// DATABASE_URL 등 이후 부팅 로직이 참조하는 환경변수를 채워야 하므로 가장 먼저 실행한다.
 (function loadEnv() {
   const envPath = path.join(__dirname, '..', '.env');
   if (!fs.existsSync(envPath)) return;
@@ -458,6 +450,66 @@ router.get('/admin/site-audit/job/:jobId/detail', (req, res) => {
   });
 });
 
+// ---------- 웹사이트 검사 이력 목록 (관리자 대시보드: 기간 필터 + 개별 항목 토글 상세보기) ----------
+router.get('/admin/site-audit/list', (req, res) => {
+  requireAdmin(req, res, () => {
+    const items = siteAudit.getAllAudits();
+    res.json({ configured: ci.isConfigured(), items });
+  });
+});
+
+// 이력 항목 하나의 GitHub Actions 실행 상태를 조회한다 (그 항목에 연결된 runId 기준).
+router.get('/admin/site-audit/:id/run-status', (req, res) => {
+  requireAdmin(req, res, async () => {
+    try {
+      const entry = siteAudit.getAuditById(req.params.id);
+      if (!entry) return res.status(404).json({ ok: false, error: '해당 이력을 찾을 수 없습니다.' });
+      if (!entry.runId) return res.json({ ok: true, run: null, jobs: [] });
+
+      const run = await ci.getRunSummary(entry.runId);
+      const jobs = await ci.getRunJobs(entry.runId);
+      res.json({
+        ok: true,
+        run: {
+          id: run.id,
+          status: run.status,
+          conclusion: run.conclusion,
+          htmlUrl: run.html_url,
+          createdAt: run.created_at,
+          updatedAt: run.updated_at,
+        },
+        jobs: jobs.map(j => ({
+          id: j.id,
+          name: j.name,
+          status: j.status,
+          conclusion: j.conclusion,
+          startedAt: j.started_at,
+          completedAt: j.completed_at,
+        })),
+      });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+});
+
+// 이력 항목 하나에 속한 특정 잡(job)의 상세 로그를 조회한다.
+router.get('/admin/site-audit/:id/job/:jobId/detail', (req, res) => {
+  requireAdmin(req, res, async () => {
+    try {
+      const entry = siteAudit.getAuditById(req.params.id);
+      if (!entry || !entry.runId) return res.status(404).json({ ok: false, error: '해당 실행 정보를 찾을 수 없습니다.' });
+      const jobs = await ci.getRunJobs(entry.runId);
+      const job = jobs.find(j => String(j.id) === req.params.jobId);
+      const logText = await ci.getJobLogs(req.params.jobId);
+      const parsed = parseJobLog(job ? job.name : '', logText);
+      res.json({ ok: true, ...parsed });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+});
+
 // ---------- 명세기반 블랙박스 테스트케이스 생성 (프론트 문서 업로드 폼) ----------
 // 엑셀/워드/PDF/텍스트 명세 문서를 업로드하면 ISO/IEC 25010(품질특성) · 25023(품질측정) ·
 // 29119(테스트 설계기법) 표준을 적용해 Claude API로 테스트케이스를 생성한다.
@@ -784,11 +836,29 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-// 0.0.0.0에 명시적으로 바인딩한다. 호스트를 지정하지 않으면 Node 버전/환경에 따라
-// IPv6(::)에만 바인딩되어 127.0.0.1(IPv4)로 접속하는 CI 헬스체크(wait-on 등)가
-// 연결에 실패하는 경우가 있다 (예: GitHub Actions 러너에서 관측됨).
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`[testops-advisor] 서버가 http://localhost:${PORT} 에서 실행 중입니다.`);
+// 부팅 순서: (1) DATABASE_URL이 설정되어 있으면 Postgres에서 최신 데이터를 먼저 복원하고
+// (없으면 기존 파일 기반 데이터를 그대로 로드), (2) 그 데이터가 비어있으면 시드 데이터를 채운 뒤
+// (3) 0.0.0.0에 바인딩해 요청을 받기 시작한다. initAsync()가 끝나기 전에는 요청을 받지 않도록
+// listen()을 그 뒤로 미뤄, getDB()를 참조하는 라우트 핸들러가 항상 최신(또는 시드된) 데이터를
+// 보게 한다.
+(async function bootstrap() {
+  await initAsync();
+
+  const db = getDB();
+  if (!db.stages || db.stages.length === 0) {
+    console.log('[bootstrap] 초기 데이터가 없어 시드 데이터를 생성합니다.');
+    seed();
+  }
+
+  // 0.0.0.0에 명시적으로 바인딩한다. 호스트를 지정하지 않으면 Node 버전/환경에 따라
+  // IPv6(::)에만 바인딩되어 127.0.0.1(IPv4)로 접속하는 CI 헬스체크(wait-on 등)가
+  // 연결에 실패하는 경우가 있다 (예: GitHub Actions 러너에서 관측됨).
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log(`[testops-advisor] 서버가 http://localhost:${PORT} 에서 실행 중입니다.`);
+  });
+})().catch((err) => {
+  console.error('[bootstrap] 서버 시작 중 오류가 발생했습니다:', err);
+  process.exit(1);
 });
 
 module.exports = server;
