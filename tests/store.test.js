@@ -174,8 +174,8 @@ describe('store.js (DATABASE_URL 설정 - Postgres 연동, pg.js는 mock으로 �
 
 describe('pg.js (DATABASE_URL 미설정 시 pg 패키지를 로드하지 않는다)', () => {
   beforeEach(() => {
-    jest.resetModules();
     delete process.env.DATABASE_URL;
+    jest.resetModules();
   });
 
   test('isConfigured()는 false를 반환하고, loadState/saveState는 즉시 안전하게 반환한다', async () => {

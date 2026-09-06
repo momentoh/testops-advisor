@@ -14,13 +14,15 @@
  * - DATABASE_URL 환경변수가 없으면 이 모듈은 비활성 상태로 남고, store.js는 기존처럼
  *   파일 기반으로만 동작한다(로컬 개발 편의성 유지).
  */
-const DATABASE_URL = process.env.DATABASE_URL || '';
-
 let pool = null;
 let pgAvailable = false;
 
+// process.env.DATABASE_URL을 모듈 로드 시점에 한 번만 캡처하지 않고 매번 직접 읽는다.
+// (테스트에서 jest.resetModules()로 모듈을 다시 불러올 때마다 그 시점의 환경변수 값을
+// 정확히 반영해야 하며, 실제 운영 환경에서는 부팅 이후 값이 바뀌지 않으므로 동작에
+// 차이가 없다.)
 function isConfigured() {
-  return Boolean(DATABASE_URL);
+  return Boolean(process.env.DATABASE_URL);
 }
 
 function getPool() {
@@ -29,7 +31,7 @@ function getPool() {
   // (제로 디펜던시 원칙의 예외로 새로 추가된 유일한 런타임 의존성)
   const { Pool } = require('pg');
   pool = new Pool({
-    connectionString: DATABASE_URL,
+    connectionString: process.env.DATABASE_URL,
     // Supabase 등 관리형 Postgres는 SSL이 필요하며, 대부분 자체 서명 체인을 사용하므로
     // rejectUnauthorized를 false로 둔다 (연결 문자열 자체가 이미 비밀번호로 보호됨).
     ssl: { rejectUnauthorized: false },
