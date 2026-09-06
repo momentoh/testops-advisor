@@ -108,11 +108,15 @@ score = confidence(upvotes, downvotes) × weight
 
 ## 데이터 영속성 관련 주의사항
 
-Render 무료 플랜은 **영구 디스크(Persistent Disk)가 아닌 컨테이너 파일시스템**을 사용하므로, 재배포하거나 컨테이너가 재시작되면 `data/db.json`의 피드백/가중치 학습 데이터가 초기화될 수 있습니다.
+Render 무료 플랜은 **영구 디스크(Persistent Disk)가 아닌 컨테이너 파일시스템**을 사용하므로, 재배포하거나 컨테이너가 재시작되면 `data/db.json`(피드백/가중치 학습 데이터, 요구사양서 리뷰·명세기반 테스트케이스·CI 실행·웹사이트 검사 이력 등)이 초기화될 수 있습니다.
 
-축적된 학습 데이터를 안전하게 보존하려면:
-- Render의 유료 "Persistent Disk" 애드온을 `/opt/render/project/src/data`에 마운트하거나,
-- 추후 PostgreSQL 등 외부 DB로 마이그레이션하는 것을 권장합니다. (`src/db/store.js`의 인터페이스만 유지하면 다른 저장소로 교체가 용이하도록 설계했습니다.)
+이를 방지하기 위해 **외부 Postgres(예: Supabase, Neon 등 무료 티어) 연동을 지원**합니다:
+
+- Render 환경변수에 `DATABASE_URL`(Postgres 연결 문자열)을 설정하면, 서버 부팅 시 Postgres에 저장된 최신 데이터를 먼저 복원한 뒤 시작합니다. 이후 데이터가 변경될 때마다 파일(`data/db.json`)뿐 아니라 Postgres에도 함께 저장되어, 재배포로 컨테이너 디스크가 초기화되어도 이력이 보존됩니다.
+- `DATABASE_URL`을 설정하지 않으면 기존처럼 파일 기반으로만 동작합니다 (로컬 개발 환경에서는 설정하지 않는 것을 권장).
+- Supabase 기준 연결 문자열은 "Connect to your project" 화면에서 **Transaction pooler**(포트 6543) 방식을 사용하는 것을 권장합니다. 서버리스/컨테이너 환경에서 Direct connection(IPv6 기반)보다 안정적으로 연결됩니다.
+- Postgres 저장은 파일 저장 뒤에 비동기로 반영되며, 저장에 실패해도 서비스 자체는 파일 기반으로 계속 동작합니다(가용성 우선 설계). 다만 이 특성상 파일 저장 직후~다음 저장 사이의 아주 짧은 시간 동안 서버가 강제 종료되면 그 사이의 변경분은 Postgres에 반영되지 않을 수 있습니다.
+- 구현은 `src/db/pg.js`(Postgres 연동)와 `src/db/store.js`의 `initAsync()`/`persist()`에 있으며, 기존 `getDB()`/`persist()` 동기 인터페이스를 그대로 유지해 다른 서비스 코드는 전혀 수정하지 않았습니다.
 
 ## 디렉터리 구조
 

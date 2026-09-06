@@ -13,6 +13,15 @@
     AI 리뷰는 토큰(비용)을 소모하므로, <strong>승인 대기</strong> 상태의 요청은 관리자가 문서 미리보기를 확인한 뒤
     승인해야만 실제 리뷰가 시작되며, 반려하면 비용 없이 종료됩니다.
   </p>
+  <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:12px; font-size:13px;">
+    <label>기간:</label>
+    <input type="date" id="req-filter-from" style="padding:4px 8px; border:1px solid #d1d5db; border-radius:6px;">
+    <span>~</span>
+    <input type="date" id="req-filter-to" style="padding:4px 8px; border:1px solid #d1d5db; border-radius:6px;">
+    <button class="btn secondary" type="button" style="padding:4px 10px; font-size:12px;" onclick="applyReqFilter()">조회</button>
+    <button class="btn secondary" type="button" style="padding:4px 10px; font-size:12px;" onclick="clearReqFilter()">전체보기</button>
+    <span id="req-filter-count" style="color:#6b7280;"></span>
+  </div>
   <div id="req-admin-empty" style="display:none; color:#9ca3af; font-size:13px;">아직 생성된 리뷰가 없습니다.</div>
   <table class="admin-table" id="req-admin-table" style="display:none;">
     <thead><tr><th>파일명</th><th>요청 시각</th><th>상태</th><th>총평</th><th>발견사항 수</th><th>승인/반려</th></tr></thead>
@@ -23,6 +32,34 @@
 
 <script>
   let reqAdminCache = {};
+  let reqAdminAllItems = []; // 필터 적용 전 전체 이력 (요청 시각 기준 최신순)
+  let reqFilterFrom = null;  // 'YYYY-MM-DD' 또는 null(제한 없음)
+  let reqFilterTo = null;
+
+  function applyReqFilter() {
+    reqFilterFrom = document.getElementById('req-filter-from').value || null;
+    reqFilterTo = document.getElementById('req-filter-to').value || null;
+    renderReqAdminList(reqAdminAllItems);
+  }
+
+  function clearReqFilter() {
+    document.getElementById('req-filter-from').value = '';
+    document.getElementById('req-filter-to').value = '';
+    reqFilterFrom = null;
+    reqFilterTo = null;
+    renderReqAdminList(reqAdminAllItems);
+  }
+
+  function filterByDateRange(items, from, to) {
+    if (!from && !to) return items;
+    return items.filter(function (item) {
+      const d = new Date(item.requestedAt);
+      const dateStr = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+      if (from && dateStr < from) return false;
+      if (to && dateStr > to) return false;
+      return true;
+    });
+  }
 
   function reqAdminStatusLabel(status) {
     if (status === 'done') return { text: '✅ 완료', color: '#16a34a' };
@@ -147,44 +184,56 @@
     document.getElementById('req-admin-detail').scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
+  function renderReqAdminList(allItems) {
+    const items = filterByDateRange(allItems, reqFilterFrom, reqFilterTo);
+    const empty = document.getElementById('req-admin-empty');
+    const table = document.getElementById('req-admin-table');
+    const body = document.getElementById('req-admin-body');
+    const countLabel = document.getElementById('req-filter-count');
+
+    countLabel.textContent = (reqFilterFrom || reqFilterTo)
+      ? '(' + items.length + '건 / 전체 ' + allItems.length + '건)'
+      : '';
+
+    if (items.length === 0) {
+      empty.style.display = 'block';
+      empty.textContent = allItems.length === 0 ? '아직 생성된 리뷰가 없습니다.' : '선택한 기간에 해당하는 이력이 없습니다.';
+      table.style.display = 'none';
+      return;
+    }
+    empty.style.display = 'none';
+    table.style.display = '';
+    body.innerHTML = '';
+    reqAdminCache = {};
+
+    items.forEach(function (item) {
+      reqAdminCache[item.id] = item;
+      const s = reqAdminStatusLabel(item.status);
+      const findingCount = (item.findings || []).length;
+      const clickable = item.status === 'done' || item.status === 'pending_approval' || item.status === 'rejected';
+      const tr = document.createElement('tr');
+      tr.innerHTML =
+        '<td>' + item.filename + '</td>' +
+        '<td>' + new Date(item.requestedAt).toLocaleString('ko-KR') + '</td>' +
+        '<td><span ' + (clickable ? 'class="job-status-link" onclick="viewReqAdminItem(\'' + item.id + '\')" style="cursor:pointer; text-decoration:underline;"' : '') +
+          ' style="color:' + s.color + '">' + s.text + '</span></td>' +
+        '<td>' + (item.status === 'done' ? reqScoreBadge(item.overallScore) : '-') + '</td>' +
+        '<td>' + (item.status === 'done' ? findingCount + '건' : '-') + '</td>' +
+        '<td>' + (item.status === 'pending_approval'
+          ? '<button class="btn" type="button" style="padding:2px 10px; font-size:12px;" onclick="approveReqReview(\'' + item.id + '\')">승인</button> ' +
+            '<button class="btn secondary" type="button" style="padding:2px 10px; font-size:12px;" onclick="rejectReqReview(\'' + item.id + '\')">반려</button>'
+          : '-') + '</td>';
+      body.appendChild(tr);
+    });
+  }
+
   function pollReqAdminStatus() {
     fetch('/req-review/status')
       .then(function (r) { return r.json(); })
       .then(function (data) {
         const items = data.items || [];
-        const empty = document.getElementById('req-admin-empty');
-        const table = document.getElementById('req-admin-table');
-        const body = document.getElementById('req-admin-body');
-
-        if (items.length === 0) {
-          empty.style.display = 'block';
-          table.style.display = 'none';
-          return;
-        }
-        empty.style.display = 'none';
-        table.style.display = '';
-        body.innerHTML = '';
-        reqAdminCache = {};
-
-        items.forEach(function (item) {
-          reqAdminCache[item.id] = item;
-          const s = reqAdminStatusLabel(item.status);
-          const findingCount = (item.findings || []).length;
-          const clickable = item.status === 'done' || item.status === 'pending_approval' || item.status === 'rejected';
-          const tr = document.createElement('tr');
-          tr.innerHTML =
-            '<td>' + item.filename + '</td>' +
-            '<td>' + new Date(item.requestedAt).toLocaleString('ko-KR') + '</td>' +
-            '<td><span ' + (clickable ? 'class="job-status-link" onclick="viewReqAdminItem(\'' + item.id + '\')" style="cursor:pointer; text-decoration:underline;"' : '') +
-              ' style="color:' + s.color + '">' + s.text + '</span></td>' +
-            '<td>' + (item.status === 'done' ? reqScoreBadge(item.overallScore) : '-') + '</td>' +
-            '<td>' + (item.status === 'done' ? findingCount + '건' : '-') + '</td>' +
-            '<td>' + (item.status === 'pending_approval'
-              ? '<button class="btn" type="button" style="padding:2px 10px; font-size:12px;" onclick="approveReqReview(\'' + item.id + '\')">승인</button> ' +
-                '<button class="btn secondary" type="button" style="padding:2px 10px; font-size:12px;" onclick="rejectReqReview(\'' + item.id + '\')">반려</button>'
-              : '-') + '</td>';
-          body.appendChild(tr);
-        });
+        reqAdminAllItems = items;
+        renderReqAdminList(items);
 
         const hasProcessing = items.some(function (item) { return item.status === 'processing'; });
         if (hasProcessing && !window.__reqAdminPolling) {
@@ -207,6 +256,15 @@
     AI 생성은 토큰(비용)을 소모하므로, <strong>승인 대기</strong> 상태의 요청은 관리자가 문서 미리보기를 확인한 뒤
     승인해야만 실제 생성이 시작되며, 반려하면 비용 없이 종료됩니다.
   </p>
+  <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:12px; font-size:13px;">
+    <label>기간:</label>
+    <input type="date" id="spec-filter-from" style="padding:4px 8px; border:1px solid #d1d5db; border-radius:6px;">
+    <span>~</span>
+    <input type="date" id="spec-filter-to" style="padding:4px 8px; border:1px solid #d1d5db; border-radius:6px;">
+    <button class="btn secondary" type="button" style="padding:4px 10px; font-size:12px;" onclick="applySpecFilter()">조회</button>
+    <button class="btn secondary" type="button" style="padding:4px 10px; font-size:12px;" onclick="clearSpecFilter()">전체보기</button>
+    <span id="spec-filter-count" style="color:#6b7280;"></span>
+  </div>
   <div id="spec-admin-empty" style="display:none; color:#9ca3af; font-size:13px;">아직 생성된 테스트케이스가 없습니다.</div>
   <table class="admin-table" id="spec-admin-table" style="display:none;">
     <thead><tr><th>파일명</th><th>요청 시각</th><th>상태</th><th>테스트케이스 수</th><th>승인/반려</th></tr></thead>
@@ -217,6 +275,23 @@
 
 <script>
   let specAdminCache = {};
+  let specAdminAllItems = [];
+  let specFilterFrom = null;
+  let specFilterTo = null;
+
+  function applySpecFilter() {
+    specFilterFrom = document.getElementById('spec-filter-from').value || null;
+    specFilterTo = document.getElementById('spec-filter-to').value || null;
+    renderSpecAdminList(specAdminAllItems);
+  }
+
+  function clearSpecFilter() {
+    document.getElementById('spec-filter-from').value = '';
+    document.getElementById('spec-filter-to').value = '';
+    specFilterFrom = null;
+    specFilterTo = null;
+    renderSpecAdminList(specAdminAllItems);
+  }
 
   function specAdminStatusLabel(status) {
     if (status === 'done') return { text: '✅ 완료', color: '#16a34a' };
@@ -316,43 +391,55 @@
     document.getElementById('spec-admin-detail').scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
+  function renderSpecAdminList(allItems) {
+    const items = filterByDateRange(allItems, specFilterFrom, specFilterTo);
+    const empty = document.getElementById('spec-admin-empty');
+    const table = document.getElementById('spec-admin-table');
+    const body = document.getElementById('spec-admin-body');
+    const countLabel = document.getElementById('spec-filter-count');
+
+    countLabel.textContent = (specFilterFrom || specFilterTo)
+      ? '(' + items.length + '건 / 전체 ' + allItems.length + '건)'
+      : '';
+
+    if (items.length === 0) {
+      empty.style.display = 'block';
+      empty.textContent = allItems.length === 0 ? '아직 생성된 테스트케이스가 없습니다.' : '선택한 기간에 해당하는 이력이 없습니다.';
+      table.style.display = 'none';
+      return;
+    }
+    empty.style.display = 'none';
+    table.style.display = '';
+    body.innerHTML = '';
+    specAdminCache = {};
+
+    items.forEach(function (item) {
+      specAdminCache[item.id] = item;
+      const s = specAdminStatusLabel(item.status);
+      const count = (item.testCases || []).length;
+      const clickable = item.status === 'done' || item.status === 'pending_approval' || item.status === 'rejected';
+      const tr = document.createElement('tr');
+      tr.innerHTML =
+        '<td>' + item.filename + '</td>' +
+        '<td>' + new Date(item.requestedAt).toLocaleString('ko-KR') + '</td>' +
+        '<td><span ' + (clickable ? 'class="job-status-link" onclick="viewSpecAdminItem(\'' + item.id + '\')" style="cursor:pointer; text-decoration:underline;"' : '') +
+          ' style="color:' + s.color + '">' + s.text + '</span></td>' +
+        '<td>' + (item.status === 'done' ? count + '개' : '-') + '</td>' +
+        '<td>' + (item.status === 'pending_approval'
+          ? '<button class="btn" type="button" style="padding:2px 10px; font-size:12px;" onclick="approveSpecTest(\'' + item.id + '\')">승인</button> ' +
+            '<button class="btn secondary" type="button" style="padding:2px 10px; font-size:12px;" onclick="rejectSpecTest(\'' + item.id + '\')">반려</button>'
+          : '-') + '</td>';
+      body.appendChild(tr);
+    });
+  }
+
   function pollSpecAdminStatus() {
     fetch('/spec-test/status')
       .then(function (r) { return r.json(); })
       .then(function (data) {
         const items = data.items || [];
-        const empty = document.getElementById('spec-admin-empty');
-        const table = document.getElementById('spec-admin-table');
-        const body = document.getElementById('spec-admin-body');
-
-        if (items.length === 0) {
-          empty.style.display = 'block';
-          table.style.display = 'none';
-          return;
-        }
-        empty.style.display = 'none';
-        table.style.display = '';
-        body.innerHTML = '';
-        specAdminCache = {};
-
-        items.forEach(function (item) {
-          specAdminCache[item.id] = item;
-          const s = specAdminStatusLabel(item.status);
-          const count = (item.testCases || []).length;
-          const clickable = item.status === 'done' || item.status === 'pending_approval' || item.status === 'rejected';
-          const tr = document.createElement('tr');
-          tr.innerHTML =
-            '<td>' + item.filename + '</td>' +
-            '<td>' + new Date(item.requestedAt).toLocaleString('ko-KR') + '</td>' +
-            '<td><span ' + (clickable ? 'class="job-status-link" onclick="viewSpecAdminItem(\'' + item.id + '\')" style="cursor:pointer; text-decoration:underline;"' : '') +
-              ' style="color:' + s.color + '">' + s.text + '</span></td>' +
-            '<td>' + (item.status === 'done' ? count + '개' : '-') + '</td>' +
-            '<td>' + (item.status === 'pending_approval'
-              ? '<button class="btn" type="button" style="padding:2px 10px; font-size:12px;" onclick="approveSpecTest(\'' + item.id + '\')">승인</button> ' +
-                '<button class="btn secondary" type="button" style="padding:2px 10px; font-size:12px;" onclick="rejectSpecTest(\'' + item.id + '\')">반려</button>'
-              : '-') + '</td>';
-          body.appendChild(tr);
-        });
+        specAdminAllItems = items;
+        renderSpecAdminList(items);
 
         const hasProcessing = items.some(function (item) { return item.status === 'processing'; });
         if (hasProcessing && !window.__specAdminPolling) {
@@ -542,6 +629,15 @@
     GitHub 연동이 설정되지 않았습니다. Render 환경변수에 <code>GITHUB_TOKEN</code>(repo, workflow 스코프)과 <code>GITHUB_REPO</code>(예: momentoh/testops-advisor)를 추가해 주세요.
   </div>
 
+  <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:12px; font-size:13px;">
+    <label>기간:</label>
+    <input type="date" id="ci-filter-from" style="padding:4px 8px; border:1px solid #d1d5db; border-radius:6px;">
+    <span>~</span>
+    <input type="date" id="ci-filter-to" style="padding:4px 8px; border:1px solid #d1d5db; border-radius:6px;">
+    <button class="btn secondary" type="button" style="padding:4px 10px; font-size:12px;" onclick="applyCiFilter()">조회</button>
+    <button class="btn secondary" type="button" style="padding:4px 10px; font-size:12px;" onclick="clearCiFilter()">전체보기</button>
+    <span id="ci-filter-count" style="color:#6b7280;"></span>
+  </div>
   <div id="ci-test-empty" style="display:none; color:#9ca3af; font-size:13px;">아직 제출된 실행 요청이 없습니다.</div>
   <table class="admin-table" id="ci-test-table" style="display:none;">
     <thead><tr><th>대상 URL</th><th>요청사항</th><th>요청 시각</th><th>상태</th><th>승인/반려</th></tr></thead>
@@ -675,6 +771,23 @@
   }
 
   let ciTestCache = {};
+  let ciTestAllItems = [];
+  let ciFilterFrom = null;
+  let ciFilterTo = null;
+
+  function applyCiFilter() {
+    ciFilterFrom = document.getElementById('ci-filter-from').value || null;
+    ciFilterTo = document.getElementById('ci-filter-to').value || null;
+    renderCiTestList(ciTestAllItems);
+  }
+
+  function clearCiFilter() {
+    document.getElementById('ci-filter-from').value = '';
+    document.getElementById('ci-filter-to').value = '';
+    ciFilterFrom = null;
+    ciFilterTo = null;
+    renderCiTestList(ciTestAllItems);
+  }
   let ciTestDetailPolling = null;
 
   function renderCiTestDetail(item) {
@@ -743,6 +856,48 @@
     document.getElementById('ci-test-detail').scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
+  function renderCiTestList(allItems) {
+    const items = filterByDateRange(allItems, ciFilterFrom, ciFilterTo);
+    const empty = document.getElementById('ci-test-empty');
+    const table = document.getElementById('ci-test-table');
+    const body = document.getElementById('ci-test-body');
+    const countLabel = document.getElementById('ci-filter-count');
+
+    countLabel.textContent = (ciFilterFrom || ciFilterTo)
+      ? '(' + items.length + '건 / 전체 ' + allItems.length + '건)'
+      : '';
+
+    if (items.length === 0) {
+      empty.style.display = 'block';
+      empty.textContent = allItems.length === 0 ? '아직 제출된 실행 요청이 없습니다.' : '선택한 기간에 해당하는 이력이 없습니다.';
+      table.style.display = 'none';
+      return;
+    }
+    empty.style.display = 'none';
+    table.style.display = '';
+    body.innerHTML = '';
+    ciTestCache = {};
+
+    items.forEach(function (item) {
+      ciTestCache[item.id] = item;
+      const s = ciTestStatusLabel(item.status);
+      const clickable = item.status !== 'pending_approval';
+      const tr = document.createElement('tr');
+      const reqShort = (item.requirements || '').length > 40 ? item.requirements.slice(0, 40) + '...' : (item.requirements || '-');
+      tr.innerHTML =
+        '<td>' + (item.targetUrl || '-') + '</td>' +
+        '<td>' + reqShort.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</td>' +
+        '<td>' + new Date(item.requestedAt).toLocaleString('ko-KR') + '</td>' +
+        '<td><span ' + (clickable || item.status === 'pending_approval' ? 'class="job-status-link" onclick="viewCiTestItem(\'' + item.id + '\')" style="cursor:pointer; text-decoration:underline;"' : '') +
+          ' style="color:' + s.color + '">' + s.text + '</span></td>' +
+        '<td>' + (item.status === 'pending_approval'
+          ? '<button class="btn" type="button" style="padding:2px 10px; font-size:12px;" onclick="approveCiTest(\'' + item.id + '\')">승인</button> ' +
+            '<button class="btn secondary" type="button" style="padding:2px 10px; font-size:12px;" onclick="rejectCiTest(\'' + item.id + '\')">반려</button>'
+          : '-') + '</td>';
+      body.appendChild(tr);
+    });
+  }
+
   function pollCiTestList() {
     fetch('/ci-test/status')
       .then(function (r) { return r.json(); })
@@ -752,38 +907,8 @@
         else { notConfigured.style.display = 'none'; }
 
         const items = data.items || [];
-        const empty = document.getElementById('ci-test-empty');
-        const table = document.getElementById('ci-test-table');
-        const body = document.getElementById('ci-test-body');
-
-        if (items.length === 0) {
-          empty.style.display = 'block';
-          table.style.display = 'none';
-          return;
-        }
-        empty.style.display = 'none';
-        table.style.display = '';
-        body.innerHTML = '';
-        ciTestCache = {};
-
-        items.forEach(function (item) {
-          ciTestCache[item.id] = item;
-          const s = ciTestStatusLabel(item.status);
-          const clickable = item.status !== 'pending_approval';
-          const tr = document.createElement('tr');
-          const reqShort = (item.requirements || '').length > 40 ? item.requirements.slice(0, 40) + '...' : (item.requirements || '-');
-          tr.innerHTML =
-            '<td>' + (item.targetUrl || '-') + '</td>' +
-            '<td>' + reqShort.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</td>' +
-            '<td>' + new Date(item.requestedAt).toLocaleString('ko-KR') + '</td>' +
-            '<td><span ' + (clickable || item.status === 'pending_approval' ? 'class="job-status-link" onclick="viewCiTestItem(\'' + item.id + '\')" style="cursor:pointer; text-decoration:underline;"' : '') +
-              ' style="color:' + s.color + '">' + s.text + '</span></td>' +
-            '<td>' + (item.status === 'pending_approval'
-              ? '<button class="btn" type="button" style="padding:2px 10px; font-size:12px;" onclick="approveCiTest(\'' + item.id + '\')">승인</button> ' +
-                '<button class="btn secondary" type="button" style="padding:2px 10px; font-size:12px;" onclick="rejectCiTest(\'' + item.id + '\')">반려</button>'
-              : '-') + '</td>';
-          body.appendChild(tr);
-        });
+        ciTestAllItems = items;
+        renderCiTestList(items);
       })
       .catch(function () {});
   }
